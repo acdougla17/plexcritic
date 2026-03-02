@@ -1,116 +1,101 @@
-import { config } from "../config.js";
-import axios from 'axios';
+import { config } from '../config.js'
+import axios from 'axios'
+import type {
+  PlexLibrary,
+  PlexLibraryResponse,
+  PlexLibraryItemResponse,
+} from '../types/plex.js'
+import type { Movies } from '../types/database.js'
+import { upsertMoviesBulk } from '../db/database.js'
 
-export interface PlexLibrary {
-    movies: PlexLibrarySection[],
-    shows: PlexLibrarySection[],
-    music: PlexLibrarySection[],
-    misc: PlexLibrarySection[]
+export async function makePlexRequest<T>(endpoint: string): Promise<T> {
+  const plexIp = config.plexUrl
+  const plexPort = config.plexPort
+  const plexToken = config.plexToken
+
+  const url = `http://${plexIp}:${plexPort}${endpoint}?X-Plex-Token=${plexToken}`
+  try {
+    const response = await axios.get<T>(url)
+    return response.data
+  } catch (err: unknown) {
+    console.error(`MPR1: Error making Plex request to ${endpoint}:`, err)
+    throw err
+  }
 }
 
-export interface PlexMediaContainer {
-    size: number,
-    allowCameraUpload: boolean,
-    allowChannelAccess: boolean,
-    allowMediaDeletion: boolean,
-    allowSharing: boolean,
-    allowSync: boolean,
-    allowTuners: boolean,
-    backgroundProcessing: boolean,
-    certificate: boolean,
-    companionProxy: boolean,
-    countryCode: string,
-    diagnostics: string,
-    eventStream: boolean,
-    friendlyName: string,
-    hubSearch: boolean,
-    itemClusters: boolean,
-    livetv: number,
-    machineIdentifier: string,
-    mediaProviders: boolean,
-    multiuser: boolean,
-    musicAnalysis: number,
-    myPlex: boolean,
-    myPlexMappingState: string,
-    myPlexSigninState: string,
-    myPlexSubscription: boolean,
-    myPlexUsername: string,
-    offlineTranscode: number,
-    ownerFeatures: string,
-    platform: string,
-    platformVersion: string,
-    pluginHost: boolean,
-    pushNotifications: boolean,
-    readOnlyLibraries: boolean,
-    streamingBrainABRVersion: number,
-    streamingBrainVersion: number,
-    sync: boolean,
-    transcoderActiveVideoSessions: number,
-    transcoderAudio: boolean,
-    transcoderLyrics: boolean,
-    transcoderPhoto: boolean,
-    transcoderSubtitles: boolean,
-    transcoderVideo: boolean,
-    transcoderVideoBitrates: string,
-    transcoderVideoQualities: string,
-    transcoderVideoResolutions: string,
-    updatedAt: number,
-    updater: boolean,
-    version: string,
-    voiceSearch: boolean,
-    Directory: [PlexLibrarySection]
-}
-
-export interface PlexLibrarySection {
-    allowSync: boolean,
-    filters: boolean,
-    refreshing: boolean,
-    key: string,
-    type: string,
-    title: string,
-    agent: string,
-    scanner: string,
-    language: string,
-    uuid: string,
-    updatedAt: number,
-    createdAt: number,
-    scannedAt: number,
-    content: boolean,
-    directory: boolean,
-    contentChangedAt: number,
-    hidden: number,
-    // Location: [ [Object] ]
-}
-
-
-export interface PlexLibraryResponse {
-    MediaContainer: PlexMediaContainer
-}
-
-// Function to fetch Plex library sections and categorize them into movies, shows, music, and misc
-// Returns a PlexLibrary object containing categorized sections
+/**************************************************************************
+ * Function to fetch Plex library sections and categorize them into movies, shows, music, and other
+ * Returns a PlexLibrary object with categorized sections
+ * Throws an error if the request fails or if the response format is unexpected
+ **************************************************************************/
 export async function getPlexLibrary(): Promise<PlexLibrary> {
-    const plexIp = config.plexUrl;
-    const plexPort = config.plexPort;
-    const plexToken = config.plexToken;
+  const endpoint = `/library/sections`
+  const library: PlexLibrary = {
+    movies: [],
+    shows: [],
+    music: [],
+    other: [],
+  }
 
-    const url = `http://${plexIp}:${plexPort}/library/sections?X-Plex-Token=${plexToken}`;
-    const response = await axios.get<PlexLibraryResponse>(url);
-    const library: PlexLibrary = {
-        movies: [],
-        shows: [],
-        music: [],
-        misc: []
-    };
-
-    for (const section of response.data.MediaContainer.Directory) {
-        console.log('Processing section:', section.title, 'with agent:', section.agent);
-        const agent = section.agent.toLowerCase();
-        if (agent.includes('movie')) library.movies.push(section);
-        else if (agent.includes('series')) library.shows.push(section);
-        else if (agent.includes('music')) library.music.push(section);
-        else library.misc.push(section);
+  try {
+    const response = await makePlexRequest<PlexLibraryResponse>(endpoint)
+    for (const section of response.MediaContainer.Directory) {
+      const agent = section.agent.toLowerCase()
+      if (agent.includes('movie')) {
+        library.movies.push(section)
+      } else if (agent.includes('series')) {
+        library.shows.push(section)
+      } else if (agent.includes('music')) {
+        library.music.push(section)
+      } else {
+        library.other.push(section)
+      }
+      console.log('Locatiopn data for section:', section)
     }
+  } catch (err: unknown) {
+    console.error('GPL1: Error fetching Plex library sections:', err)
+    throw err
+  }
 
-    return library;
+  return library
+}
+
+export async function getAllItemsInSection(sectionKey: string): Promise<any> {
+  const endpoint = `/library/sections/${sectionKey}/all`
+  console.log(endpoint)
+  try {
+    const response: PlexLibraryItemResponse = await makePlexRequest(endpoint)
+    console.log(
+      response.MediaContainer.Metadata.length,
+      'items found in ',
+      response.MediaContainer.librarySectionTitle,
+    )
+    if (response.MediaContainer.viewGroup === 'movie') {
+      const movies: Movies[] = response.MediaContainer.Metadata.map((item) => ({
+        ratingKey: item.ratingKey,
+        title: item.title,
+        year: item.year,
+        dateAdded: item.addedAt,
+        originallyAvailableAt: item.originallyAvailableAt,
+        addedAt: item.addedAt,
+        //lastViewedAt: 0, // item.lastViewedAt,
+        //playCount: 0, // item.playCount,
+        //genres: item.Genre ? item.Genre.map((g: any) => g.tag).join(', ') : '',
+        
+        audioCodec: item.Media[0].audioCodec,
+        videoCodec: item.Media[0].videoCodec,
+        videoResolution: item.Media[0].videoResolution,
+        container: item.Media[0].container,
+        duration: item.Media[0].duration,
+        collections: item.Collection ? item.Collection.map((c) => c.tag).join(', ') : '',
+        coverPosterUrl: item.thumb ?? '',
+      }))
+
+      upsertMoviesBulk(movies)
+    }
+    return response
+  } catch (err: unknown) {
+    console.error(`Error fetching items in section ${sectionKey}:`, err)
+    throw err
+  }
 }
