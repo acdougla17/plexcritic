@@ -8,6 +8,37 @@ export interface PlexLibrary {
   other: PlexLibrarySection[]
 }
 
+// This is the container that holds the details for all media details
+export interface PlexMedia {
+  id: number
+  duration: number
+  bitrate: number
+  width: number
+  height: number
+  aspectRatio: number
+  audioChannels: number
+  audioCodec: string
+  videoCodec: string
+  videoResolution: string
+  container: string
+  videoFrameRate: string
+  audioProfile: string
+  videoProfile: string
+  hasVoiceActivity: boolean
+  Part: [
+    {
+      id: number
+      key: string
+      duration: number
+      file: string
+      size: number
+      audioProfile: string
+      container: string
+      videoProfile: string
+    },
+  ]
+}
+
 export interface PlexSectionMediaContainer {
   size: number
   allowCameraUpload: boolean
@@ -122,6 +153,10 @@ export interface PlexLibraryItem {
   duration: number
   key: string
   originallyAvailableAt: string
+  leafCount?: number
+  viewedLeafCount?: number
+  childCount?: number
+  seasonCount?: number
   primaryExtraKey: string
   rating: number
   ratingKey: string
@@ -133,39 +168,17 @@ export interface PlexLibraryItem {
   type: string
   updatedAt: number
   year: number
-  Media: [
-    {
-      aspectRatio: number
-      audioChannels: number
-      audioCodec: string
-      bitrate: number
-      container: string
-      duration: number
-      height: number
-      id: number
-      videoCodec: string
-      videoFrameRate: string
-      videoResolution: string
-      width: number
-      Part: [
-        {
-          container: string
-          duration: number
-          file: string
-          id: number
-          key: string
-          size: number
-        },
-      ]
-    },
-  ]
-  Genre: [PlexTag]
-  Writer: [PlexTag]
-  Director: [PlexTag]
-  Country: [PlexTag]
-  Role: [PlexTag]
-  Collection: [PlexTag]
-  Image: [
+  contentRatingAge: number
+  audienceRating: number
+  Media: [PlexMedia]
+  Genre?: [PlexTag]
+  Writer?: [PlexTag]
+  Director?: [PlexTag]
+  Country?: [PlexTag]
+  Role?: [PlexTag]
+  Collection?: [PlexTag]
+  Label?: [PlexTag]
+  Image?: [
     {
       alt: string
       type: string
@@ -175,5 +188,77 @@ export interface PlexLibraryItem {
 }
 
 interface PlexTag {
+  id?: number
   tag: string
+}
+
+/********************TV SHOWS*********************/
+export interface PlexShowMediaContainer {
+  size: number
+  allowSync: boolean
+  art: string
+  identifier: string
+  key: string
+  librarySectionID: number
+  librarySectionTitle: string
+  librarySectionUUID: string
+  mediaTagPrefix: string
+  mediaTagVersion: number
+  mixedParents: boolean
+  nocache: boolean
+  parentIndex: number
+  parentTitle: string
+  parentYear: number
+  theme: string
+  title1: string
+  title2: string
+  viewGroup: string
+  viewMode: number
+  Metadata: [PlexShowItem]
+}
+
+export interface PlexShowItem {
+  ratingKey: string
+  key: string
+  guid: string
+  studio: string
+  type: string
+  title: string
+  contentRating: string
+  contentRatingAge: number
+  summary: string
+  index: number
+  audienceRating: number
+  viewCount: number
+  lastViewedAt: number
+  year: number
+  thumb: string
+  art: string
+  theme: string
+  duration: number
+  originallyAvailableAt: string
+  leafCount: number
+  viewedLeafCount: number
+  childCount: number
+  addedAt: number
+  updatedAt: number
+  audienceRatingImage: string
+  Media: [PlexMedia]
+  Image?: [
+    {
+      alt: string
+      type: string
+      url: string
+    },
+  ]
+  UltraBlurColors: {
+    topLeft: string
+    topRight: string
+    bottomLeft: string
+    bottomRight: string
+  }
+  Genre?: [PlexTag]
+  Country?: [PlexTag]
+  Collection?: [PlexTag]
+  Role?: [PlexTag]
 }

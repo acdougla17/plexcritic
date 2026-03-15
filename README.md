@@ -8,7 +8,7 @@ This project is to create a Plex critic that will analyze your collection like a
 1) Basic Skeleton (DONE)
 2) Initial connection to Plex (DONE)
 3) Fetch all items in a single library
-4) Database Layer
+4) Database Layer (DONE)
     - Create schema
     - Create route
 5) Create analytics module
@@ -25,3 +25,6 @@ This project is to create a Plex critic that will analyze your collection like a
 8) Dockerize
 
 
+#TODO
+- Separate table for TV show episodes
+- Separate table for songs

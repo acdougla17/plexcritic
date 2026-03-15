@@ -1,8 +1,8 @@
 import express from 'express'
 import { config } from './config.js'
 import healthRouter from './routes/healthCheck.js'
-import getLibraryRouter from './routes/getLibrary.js'
-import getAllItemsInSectionRouter from './routes/getAllItemsInSection.js'
+import getAllEpisodesForShowRouter from './routes/getFromPlex.js'
+import refreshLibraryRouter from './routes/refreshLibrary.js'
 import path from 'node:path'
 
 const app = express()
@@ -12,20 +12,44 @@ const port = config.port
 const routesArray = [
   {
     path: '/health',
+    hasParams: false,
     name: 'Health Check',
     description: 'Check server health and uptime',
   },
   {
-    path: '/getLibrary',
+    path: '/getFromPlex/getAllLibraries',
+    hasParams: false,
     name: 'Get Library Sections',
     description:
       'Fetch Plex library sections categorized into movies, shows, music, and other',
   },
   {
-    path: '/getAllItemsInSection/:sectionKey',
+    path: '/getFromPlex/allLibraryItems/2',
+    hasParams: true,
     name: 'Get All Items in Section',
     description:
       'Fetch all items in a specific Plex library section by providing the sectionKey as a URL parameter',
+  },
+  {
+    path: '/getFromPlex/allEpisodes/56412',
+    hasParams: true,
+    name: 'Get All Episodes for Show',
+    description:
+      "Fetch all episodes for a specific show by providing the show's ratingKey as a URL parameter",
+  },
+  {
+    path: '/getFromPlex/itemDetails/56412',
+    hasParams: true,
+    name: 'Get Item Details',
+    description:
+      'Fetch detailed information for a specific Plex library item by providing the ratingKey as a URL parameter',
+  },
+  {
+    path: '/refreshLibrary/:sectionKey',
+    hasParams: true,
+    name: 'Refresh Library Section',
+    description:
+      'Refresh a specific Plex library section by providing the sectionKey as a URL parameter. You can also provide multiple section keys separated by commas, or use "ALL" to refresh all sections.',
   },
 ]
 
@@ -44,10 +68,15 @@ function generateHomePage() {
     `<p>Available endpoints:</p>` +
     `<ul>` +
     routesArray
-      .map(
-        (route) =>
-          `<li><a href="${route.path}">${route.path}</a> - ${route.description}</li>`,
-      )
+      .map((route) => {
+        if (route.hasParams) {
+          return `<li>
+                <a href="${route.path}">${route.path}</a> - ${route.description} (Requires URL parameters)
+              </li>`
+        } else {
+          return `<li><a href="${route.path}">${route.path}</a> - ${route.description}</li>`
+        }
+      })
       .join('') +
     `</ul>` +
     `</body>` +
@@ -65,5 +94,5 @@ app.listen(port, () => {
 
 // Routes
 app.use('/health', healthRouter)
-app.use('/getLibrary', getLibraryRouter)
-app.use('/getAllItemsInSection', getAllItemsInSectionRouter)
+app.use('/getFromPlex', getAllEpisodesForShowRouter)
+app.use('/refreshLibrary', refreshLibraryRouter)

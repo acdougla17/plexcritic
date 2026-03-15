@@ -5,8 +5,6 @@ import type {
   PlexLibraryResponse,
   PlexLibraryItemResponse,
 } from '../types/plex.js'
-import type { Movies } from '../types/database.js'
-import { upsertMoviesBulk } from '../db/database.js'
 
 export async function makePlexRequest<T>(endpoint: string): Promise<T> {
   const plexIp = config.plexUrl
@@ -18,7 +16,7 @@ export async function makePlexRequest<T>(endpoint: string): Promise<T> {
     const response = await axios.get<T>(url)
     return response.data
   } catch (err: unknown) {
-    console.error(`MPR1: Error making Plex request to ${endpoint}:`, err)
+    console.error(`MPR1: Error making Plex request to ${endpoint}:`)
     throw err
   }
 }
@@ -50,7 +48,6 @@ export async function getPlexLibrary(): Promise<PlexLibrary> {
       } else {
         library.other.push(section)
       }
-      console.log('Locatiopn data for section:', section)
     }
   } catch (err: unknown) {
     console.error('GPL1: Error fetching Plex library sections:', err)
@@ -60,9 +57,10 @@ export async function getPlexLibrary(): Promise<PlexLibrary> {
   return library
 }
 
-export async function getAllItemsInSection(sectionKey: string): Promise<any> {
+export async function getAllItemsInSection(
+  sectionKey: string,
+): Promise<PlexLibraryItemResponse> {
   const endpoint = `/library/sections/${sectionKey}/all`
-  console.log(endpoint)
   try {
     const response: PlexLibraryItemResponse = await makePlexRequest(endpoint)
     console.log(
@@ -70,32 +68,43 @@ export async function getAllItemsInSection(sectionKey: string): Promise<any> {
       'items found in ',
       response.MediaContainer.librarySectionTitle,
     )
-    if (response.MediaContainer.viewGroup === 'movie') {
-      const movies: Movies[] = response.MediaContainer.Metadata.map((item) => ({
-        ratingKey: item.ratingKey,
-        title: item.title,
-        year: item.year,
-        dateAdded: item.addedAt,
-        originallyAvailableAt: item.originallyAvailableAt,
-        addedAt: item.addedAt,
-        //lastViewedAt: 0, // item.lastViewedAt,
-        //playCount: 0, // item.playCount,
-        //genres: item.Genre ? item.Genre.map((g: any) => g.tag).join(', ') : '',
-        
-        audioCodec: item.Media[0].audioCodec,
-        videoCodec: item.Media[0].videoCodec,
-        videoResolution: item.Media[0].videoResolution,
-        container: item.Media[0].container,
-        duration: item.Media[0].duration,
-        collections: item.Collection ? item.Collection.map((c) => c.tag).join(', ') : '',
-        coverPosterUrl: item.thumb ?? '',
-      }))
-
-      upsertMoviesBulk(movies)
-    }
     return response
   } catch (err: unknown) {
     console.error(`Error fetching items in section ${sectionKey}:`, err)
     throw err
   }
 }
+
+export async function getItemDetails(
+  ratingKey: string,
+): Promise<PlexLibraryItemResponse> {
+  const endpoint = `/library/metadata/${ratingKey}`
+  try {
+    const response: PlexLibraryItemResponse = await makePlexRequest(endpoint)
+    return response
+  } catch (err: unknown) {
+    console.error(
+      `Error fetching details for item with ratingKey ${ratingKey}:`,
+      err,
+    )
+    throw err
+  }
+}
+
+export async function getAllEpisodesForShow(
+  ratingKey: string,
+): Promise<PlexLibraryItemResponse> {
+  const endpoint = `/library/metadata/${ratingKey}/allLeaves`
+  try {
+    const response: PlexLibraryItemResponse = await makePlexRequest(endpoint)
+    return response
+  } catch (err: unknown) {
+    console.error(
+      `Error fetching all episodes for show with ratingKey ${ratingKey}:`,
+      err,
+    )
+    throw err
+  }
+}
+
+
