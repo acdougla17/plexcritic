@@ -11,6 +11,8 @@ import type {
   MediaTagLink,
   MovieContainer,
   ShowContainer,
+  SqLiteUpsertResp,
+  SyncLog,
 } from '../types/database.js'
 import type { PlexLibraryItemResponse, PlexLibraryItem } from '../types/plex.js'
 import fs from 'fs'
@@ -39,11 +41,7 @@ const upsertMediaTags = db.prepare<{ ratingKey: string; tagId: number }>(
 const getTagId = db.prepare<{ tagType: string; tagName: string }, TagRow>(
   Queries.getTagId(),
 )
-
-/************TODO************
- - Delete stuff missing from sync
- - Make sync engine
-*****************************/
+const upsertSyncLog = db.prepare(Queries.getUpsertSyncLogQuery())
 
 /************MAPPERS************
  * Map Plex data -> DB format
@@ -159,7 +157,6 @@ export async function mapPlexShows(plexShows: PlexLibraryItemResponse) {
   const librarySectionKey = plexShows.MediaContainer.librarySectionID
   const tagSet = new Set<string>()
 
-
   // Loop through every show passed into the mapper
   for (const show of shows) {
     // Fetch all the episodes
@@ -171,7 +168,7 @@ export async function mapPlexShows(plexShows: PlexLibraryItemResponse) {
         ratingKey: episode.ratingKey,
         showRatingKey: show.ratingKey,
         seasonNumber: episode.index ?? 0,
-        episodeNumber: episode.parentIndex ?? 0
+        episodeNumber: episode.parentIndex ?? 0,
       })
       // For each movie , build a media record (shared format between movies and tv) and push it to mediaArr
       mediaArr.push({
@@ -382,6 +379,50 @@ export function mapPlexEpisodes(plexEpisodes: PlexLibraryItemResponse) {
   }
 }
 
+/************LOGGERS************
+ * Logs changes made to DB
+ *****************************/
+function syncLogUpsert(
+  arr: Media[] | Show[] | Movie[] | MediaFiles[] | MediaTagLink[],
+  table: string,
+  results: SqLiteUpsertResp[],
+) {
+  if (!arr || arr.length === 0 || !results || results.length === 0) {
+    return
+  }
+  try {
+    const trx = db.transaction(() => {
+      const logBatch: SyncLog[] = []
+      for (const resultRow of results) {
+        const arrIndex = resultRow.lastInsertRowid
+
+        // Only create a log record if lastInsertRowid has a value because that means a change was made
+        if (arrIndex != 0) {
+          const logEntry = `Upsert into: ${table}`
+          if (arr[arrIndex]?.ratingKey) {
+            upsertSyncLog.run({
+              ratingKey: arr[arrIndex]?.ratingKey,
+              lastSynced: Date.now(),
+              logEntry: logEntry,
+            })
+            logBatch.push({
+              ratingKey: arr[arrIndex]?.ratingKey,
+              lastSynced: Date.now(),
+              logEntry: logEntry,
+            })
+          }
+        }
+      }
+    })
+
+    trx()
+  } catch (err) {
+    console.log('SyncLog Error: ', err)
+    return
+  }
+  return
+}
+
 /************UPSERTERS************
  * Inserts data into DB tables
  *****************************/
@@ -399,27 +440,45 @@ export function upsertMovie(container: MovieContainer) {
   const trx = db.transaction(() => {
     // 1. Media
     try {
+      const logData: SqLiteUpsertResp[] = []
       for (const m of mediaArr) {
-        upsertMedia.run(m)
+        const r = upsertMedia.run(m)
+        logData.push({
+          changes: r.changes,
+          lastInsertRowid: Number(r.lastInsertRowid),
+        })
       }
+      syncLogUpsert(mediaArr, 'media', logData)
     } catch (err) {
       console.error('Error when upserting to media table: ', err)
     }
 
     // 2. Movies
     try {
+      const logData: SqLiteUpsertResp[] = []
       for (const m of moviesArr) {
-        upsertMovies.run(m)
+        const r = upsertMovies.run(m)
+        logData.push({
+          changes: r.changes,
+          lastInsertRowid: Number(r.lastInsertRowid),
+        })
       }
+      syncLogUpsert(moviesArr, 'movies', logData)
     } catch (err) {
       console.error('Error when upserting to movies table: ', err)
     }
 
     // 3. Media Files
     try {
+      const logData: SqLiteUpsertResp[] = []
       for (const mf of mediaFilesArr) {
-        upsertMediaFiles.run(mf)
+        const r = upsertMediaFiles.run(mf)
+        logData.push({
+          changes: r.changes,
+          lastInsertRowid: Number(r.lastInsertRowid),
+        })
       }
+      syncLogUpsert(mediaFilesArr, 'media_files', logData)
     } catch (err) {
       console.error('Error when upserting to media_files table: ', err)
     }
@@ -435,18 +494,24 @@ export function upsertMovie(container: MovieContainer) {
 
     // 5. Build + insert media_tags
     try {
+      const logData: SqLiteUpsertResp[] = []
       for (const link of mediaTagLinks) {
         const row = getTagId.get({
           tagType: link.tagType,
           tagName: link.tagName,
         })
         if (row) {
-          upsertMediaTags.run({
+          const r = upsertMediaTags.run({
             ratingKey: link.ratingKey,
             tagId: row.id,
           })
+          logData.push({
+            changes: r.changes,
+            lastInsertRowid: Number(r.lastInsertRowid),
+          })
         }
       }
+      syncLogUpsert(mediaTagLinks, 'media_tags', logData)
     } catch (err) {
       console.error('Error when upserting to media_tags table: ', err)
     }
@@ -543,74 +608,9 @@ export function upsertShow(container: ShowContainer) {
   return count
 }
 
-// REMOVE
-export function upsertShowsBulk(shows: any[]) {
-  const insertMany = db.transaction((shows) => {
-    for (const show of shows) {
-      upsertShows.run(show)
-    }
-  })
-  insertMany(shows)
-  console.log(`Upserted ${shows.length} shows into the database.`)
-  return true
-}
-
-// REMOVE
-export async function updateAllShowsInSection(
-  allItems: PlexLibraryItemResponse,
-): Promise<boolean> {
-  try {
-    if (allItems.MediaContainer.viewGroup === 'show') {
-      //   const shows: Shows[] = allItems.MediaContainer.Metadata.map((item) => ({
-      //     ratingKey: item.ratingKey,
-      //     title: item.title,
-      //     year: item.year,
-      //     dateAdded: item.addedAt,
-      //     originallyAvailableAt: item.originallyAvailableAt,
-      //     genres: item.Genre ? item.Genre.map((g: any) => g.tag).join(', ') : '',
-      //     countries: item.Country
-      //       ? item.Country.map((c: any) => c.tag).join(', ')
-      //       : '',
-      //     directors: item.Director
-      //       ? item.Director.map((d: any) => d.tag).join(', ')
-      //       : '',
-      //     writers: item.Writer
-      //       ? item.Writer.map((w: any) => w.tag).join(', ')
-      //       : '',
-      //     actors: item.Role ? item.Role.map((r: any) => r.tag).join(', ') : '',
-      //     studio: item.studio ?? '',
-      //     contentRating: item.contentRating ?? '',
-      //     contentRatingAge: item.contentRatingAge ?? 0,
-      //     audienceRating: item.audienceRating ?? 0,
-      //     tagLine: item.tagline ?? '',
-      //     addedAt: item.addedAt,
-      //     //lastViewedAt: 0, // item.lastViewedAt,
-      //     //playCount: 0, // item.playCount,
-      //     audioCodec: item.Media[0].audioCodec,
-      //     videoCodec: item.Media[0].videoCodec,
-      //     videoResolution: item.Media[0].videoResolution,
-      //     videoFrameRate: item.Media[0].videoFrameRate,
-      //     container: item.Media[0].container,
-      //     duration: item.Media[0].duration,
-      //     collections: item.Collection
-      //       ? item.Collection.map((c) => c.tag).join(', ')
-      //       : '',
-      //     coverPosterUrl: item.thumb ?? '',
-      //     //file: item.Media[0].Part[0].file,
-      //     file: getAllEpisodesForShow(item.ratingKey),
-      //     lastRefreshed: Date.now(),
-      //     libraryName: allItems.MediaContainer.librarySectionTitle,
-      //     librarySectionKey: allItems.MediaContainer.librarySectionID.toString(),
-      //   }))
-      //   upsertShowsBulk(shows)
-    }
-    return true
-  } catch (err: unknown) {
-    console.error(`Error upserting items in section ${allItems}:`, err)
-    throw err
-  }
-}
-
+/************REFRESHERS************
+ * Refreshes data in library
+ *****************************/
 export async function refreshAllItemsInSection(
   allItems: PlexLibraryItemResponse,
 ): Promise<boolean> {
@@ -636,3 +636,40 @@ export async function refreshAllItemsInSection(
     throw err
   }
 }
+
+/************CLEANERS************
+ * Cleans out dead data in library
+ *****************************/
+export function clearDatabase(tableName: string) {
+  try {
+    const trx = db.transaction(() => {
+      if (tableName === 'ALL') {
+        db.prepare(`DELETE FROM critic_reviews`).run()
+        db.prepare(`DELETE FROM media_tags`).run()
+        db.prepare(`DELETE FROM media_files`).run()
+        db.prepare(`DELETE FROM episodes`).run()
+        db.prepare(`DELETE FROM shows`).run()
+        db.prepare(`DELETE FROM movies`).run()
+        db.prepare(`DELETE FROM tags`).run()
+        db.prepare(`DELETE FROM media`).run()
+        db.prepare(`DELETE FROM sync_log`).run()
+        db.prepare(`DELETE FROM music_tracks`).run()
+        db.prepare(`DELETE FROM music_albums`).run()
+        db.prepare(`DELETE FROM music_artists`).run()
+        db.prepare(`DELETE FROM sqlite_sequence`).run()
+      } else {
+        db.prepare(`DELETE FROM ${tableName}`).run()
+      }
+    })
+
+    trx()
+  } catch (err) {
+    console.error('Database cleanup error for table: ', tableName)
+    return err
+  }
+  return 'DB has been cleared'
+}
+
+// TODO - Master refresh function
+// TODO - Data cleaners
+// TODO - Creating views

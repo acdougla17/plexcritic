@@ -4,6 +4,7 @@ import healthRouter from './routes/healthCheck.js'
 import getAllEpisodesForShowRouter from './routes/getFromPlex.js'
 import refreshLibraryRouter from './routes/refreshLibrary.js'
 import testRouter from './routes/test.js'
+import dbRouter from './routes/db.js'
 import path from 'node:path'
 
 const app = express()
@@ -58,6 +59,20 @@ const routesArray = [
     description:
       'Refresh a specific Plex library section by providing the sectionKey as a URL parameter. You can also provide multiple section keys separated by commas, or use "ALL" to refresh all sections.',
   },
+  {
+    path: '/db/removeAll',
+    hasParams: true,
+    name: 'Clear out entire local database',
+    description:
+      'Deletes all rows from local SQLite database tables',
+  },
+  {
+    path: '/db/remove/:tableName',
+    hasParams: true,
+    name: 'Clear out local database table',
+    description:
+      'Deletes all rows from local SQLite database table',
+  },
 ]
 
 // Function to generate the HTML for the home page, listing available routes and their descriptions
@@ -104,3 +119,4 @@ app.use('/health', healthRouter)
 app.use('/getFromPlex', getAllEpisodesForShowRouter)
 app.use('/refreshLibrary', refreshLibraryRouter)
 app.use('/test', testRouter)
+app.use('/db', dbRouter)

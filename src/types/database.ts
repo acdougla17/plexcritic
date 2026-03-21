@@ -154,8 +154,20 @@ export interface Other {
 }
 
 export interface CriticDatabaseLibrary {
-  movies: Movies[]
-  shows: Shows[]
+  movies: Movie[]
+  shows: Show[]
   music: Music[]
   other: Other[]
+}
+
+export interface SyncLog{
+    id?: number
+    ratingKey: string
+    lastSynced: number
+    logEntry: string
+}
+
+export interface SqLiteUpsertResp {
+  changes: number
+  lastInsertRowid: number
 }

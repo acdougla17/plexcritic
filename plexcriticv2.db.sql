@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS "sync_log" (
 	"id"	INTEGER,
 	"ratingKey"	TEXT,
 	"lastSynced"	INTEGER,
+	"logEntry"	TEXT,
 	PRIMARY KEY("id" AUTOINCREMENT)
 );
 CREATE TABLE IF NOT EXISTS "tags" (

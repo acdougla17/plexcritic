@@ -29,11 +29,6 @@ router.get(
         const mappedShows = await DB.mapPlexShows(shows)
         const result = await DB.upsertShow(mappedShows)
         res.send(result)
-      } else if (test === 'episodes') {
-        const episodes = await Plex.getAllEpisodesForShow('56412')
-        console.log(' fetched ', episodes.MediaContainer.Metadata[0].title)
-        const mappedEpisodes = await DB.mapPlexEpisodes(episodes)
-        res.send(mappedEpisodes)
       } else {
         res.send('No test ran')
       }

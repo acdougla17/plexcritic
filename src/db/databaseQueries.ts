@@ -238,16 +238,18 @@ export function getTagId() {
  * *******************************************/
 export function getUpsertSyncLogQuery() {
   return `INSERT INTO sync_log (
-        id, 
         ratingKey,
-        lastSynced
+        lastSynced,
+        logEntry
     ) VALUES (
         @ratingKey, 
-        @lastSynced
+        @lastSynced,
+        @logEntry
     )
-    ON CONFLICT(ratingKey) DO UPDATE SET
+    ON CONFLICT(id) DO UPDATE SET
         ratingKey = excluded.ratingKey,
-        lastSynced = excluded.lastSynced`
+        lastSynced = excluded.lastSynced,
+        logEntry = excluded.logEntry`
 }
 
 export function getDeleteSyncLogByRatingKeyQuery() {
