@@ -1,13 +1,21 @@
 import Database from 'better-sqlite3'
 import path from 'path'
-import type { Movies, Shows } from '../types/database.js'
+import type {
+  Movie,
+  Show,
+  Episode,
+  Media,
+  MediaFiles,
+  Tags,
+  TagRow,
+  MediaTagLink,
+  MovieContainer,
+  ShowContainer,
+} from '../types/database.js'
 import type { PlexLibraryItemResponse, PlexLibraryItem } from '../types/plex.js'
 import fs from 'fs'
 import * as Queries from './databaseQueries.js'
-
-type TagRow = {
-  id: number
-}
+import { getAllEpisodesForShow } from '../connectors/plex.js'
 
 // Load/Create dabase
 const dbPath = path.join(process.cwd(), 'plexcriticv2.db')
@@ -23,313 +31,519 @@ const upsertMedia = db.prepare(Queries.getUpsertMediaQuery())
 const upsertMediaFiles = db.prepare(Queries.getUpsertMediaFilesQuery())
 const upsertMovies = db.prepare(Queries.getUpsertMoviesQuery())
 const upsertShows = db.prepare(Queries.getUpsertShowsQuery())
+const upsertEpisodes = db.prepare(Queries.getUpsertEpisodesQuery())
 const upsertTags = db.prepare(Queries.getUpsertTagsQuery())
-const upsertMediaTags = db.prepare(Queries.getUpsertMediaTagsQuery())
-const getTagId = db.prepare(Queries.getTagId())
-
-// Create table if it doesn't exist
-// db.exec(`
-//   CREATE TABLE IF NOT EXISTS movies (
-//     ratingKey TEXT PRIMARY KEY,
-//     title TEXT NOT NULL,
-//     year INTEGER,
-//     dateAdded INTEGER,
-//     originallyAvailableAt TEXT,
-//     genres TEXT,
-//     countries TEXT,
-//     directors TEXT,
-//     writers TEXT,
-//     actors TEXT,
-//     studio TEXT,
-//     contentRating TEXT,
-//     contentRatingAge INTEGER,
-//     audienceRating REAL,
-//     tagLine TEXT,
-//     addedAt INTEGER,
-//     audioCodec TEXT,
-//     videoCodec TEXT,
-//     videoResolution TEXT,
-//     videoFrameRate TEXT,
-//     container TEXT,
-//     duration INTEGER,
-//     collections TEXT,
-//     coverPosterUrl TEXT,
-//     file TEXT,
-//     lastRefreshed INTEGER,
-//     libraryName TEXT,
-//     librarySectionKey TEXT
-//    )
-// `)
-
-// export const upsertMovie = db.prepare(`
-//   INSERT INTO movies (
-//     ratingKey,
-//     title,
-//     year,
-//     dateAdded,
-//     originallyAvailableAt,
-//     genres,
-//     countries,
-//     directors,
-//     writers,
-//     actors,
-//     studio,
-//     contentRating,
-//     contentRatingAge,
-//     audienceRating,
-//     tagLine,
-//     addedAt,
-//     audioCodec,
-//     videoCodec,
-//     videoResolution,
-//     videoFrameRate,
-//     container,
-//     duration,
-//     collections,
-//     coverPosterUrl,
-//     file,
-//     lastRefreshed,
-//     libraryName,
-//     librarySectionKey
-//   ) VALUES (
-//     @ratingKey,
-//     @title,
-//     @year,
-//     @dateAdded,
-//     @originallyAvailableAt,
-//     @genres,
-//     @countries,
-//     @directors,
-//     @writers,
-//     @actors,
-//     @studio,
-//     @contentRating,
-//     @contentRatingAge,
-//     @audienceRating,
-//     @tagLine,
-//     @addedAt,
-//     @audioCodec,
-//     @videoCodec,
-//     @videoResolution,
-//     @videoFrameRate,
-//     @container,
-//     @duration,
-//     @collections,
-//     @coverPosterUrl,
-//     @file,
-//     @lastRefreshed,
-//     @libraryName,
-//     @librarySectionKey
-//   )
-//   ON CONFLICT(ratingKey) DO UPDATE SET
-//     title = excluded.title,
-//     year = excluded.year,
-//     dateAdded = excluded.dateAdded,
-//     originallyAvailableAt = excluded.originallyAvailableAt,
-//     genres = excluded.genres,
-//     countries = excluded.countries,
-//     directors = excluded.directors,
-//     writers = excluded.writers,
-//     actors = excluded.actors,
-//     studio = excluded.studio,
-//     contentRating = excluded.contentRating,
-//     contentRatingAge = excluded.contentRatingAge,
-//     audienceRating = excluded.audienceRating,
-//     tagLine = excluded.tagLine,
-//     addedAt = excluded.addedAt,
-//     audioCodec = excluded.audioCodec,
-//     videoCodec = excluded.videoCodec,
-//     videoResolution = excluded.videoResolution,
-//     videoFrameRate = excluded.videoFrameRate,
-//     container = excluded.container,
-//     duration = excluded.duration,
-//     collections = excluded.collections,
-//     coverPosterUrl = excluded.coverPosterUrl,
-//     file = excluded.file,
-//     lastRefreshed = excluded.lastRefreshed,
-//     libraryName = excluded.libraryName,
-//     librarySectionKey = excluded.librarySectionKey
-// `)
+const upsertMediaTags = db.prepare<{ ratingKey: string; tagId: number }>(
+  Queries.getUpsertMediaTagsQuery(),
+)
+const getTagId = db.prepare<{ tagType: string; tagName: string }, TagRow>(
+  Queries.getTagId(),
+)
 
 /************TODO************
  - Delete stuff missing from sync
  - Make sync engine
- - Make mapper functions from Plex to DB
 *****************************/
 
-export function upsertMovie(movie: PlexLibraryItem) {
-  // TODO Map to DB fields
+/************MAPPERS************
+ * Map Plex data -> DB format
+ *****************************/
+export function mapPlexMovies(plexMovies: PlexLibraryItemResponse) {
+  let moviesArr: Movie[] = []
+  let mediaArr: Media[] = []
+  let mediaFilesArr: MediaFiles[] = []
+  let mediaTagLinks: MediaTagLink[] = []
+  let tagsArr: Tags[] = []
+  const movies = plexMovies.MediaContainer.Metadata
+  const libraryName = plexMovies.MediaContainer.librarySectionTitle
+  const librarySectionKey = plexMovies.MediaContainer.librarySectionID
+  const tagSet = new Set<string>()
 
-  // Insert into DB tables
-  upsertMedia.run(movie)
-  upsertMovies.run(movie)
-  upsertMediaFiles.run(movie)
-  syncAllTagsFromPlexItem(movie)
-}
+  // Loop through every movie passed into the mapper
+  for (const movie of movies) {
+    // For each movie, build a record and push it to moviesArr
+    moviesArr.push({
+      ratingKey: movie.ratingKey,
+      studio: movie.studio ?? '',
+      tagLine: movie.tagline ?? '',
+      contentRating: movie.contentRating ?? '',
+      contentRatingAge: movie.contentRatingAge ?? '',
+      audienceRating: movie.audienceRating ?? '',
+      coverPosterUrl:
+        movie.Image?.find((img) => img.type === 'coverPoster')?.url ?? '',
+    })
 
-function syncAllTagsFromPlexItem(item: any) {
-  for (const [key, value] of Object.entries(item)) {
-    if (
-      !Array.isArray(value) ||
-      !value.length ||
-      typeof value[0] !== 'object' ||
-      !('tag' in value[0])
-    ) {
-      continue
+    // For each movie , build a media record (shared format between movies and tv) and push it to mediaArr
+    mediaArr.push({
+      ratingKey: movie.ratingKey,
+      type: movie.type ?? 'other',
+      title: movie.title ?? '',
+      year: movie.year ?? 0,
+      dateAdded: movie.addedAt ?? 0,
+      originallyAvailableAt: movie.originallyAvailableAt ?? '',
+      duration: movie.duration ?? 0,
+      libraryName: libraryName,
+      librarySectionKey: librarySectionKey.toString(),
+      lastRefreshed: Date.now(),
+    })
+
+    // For each media section in a movie, build a media files record for each file and push it to mediaArr
+    for (const media of movie.Media) {
+      for (const file of media.Part) {
+        mediaFilesArr.push({
+          id: media.id,
+          ratingKey: movie.ratingKey,
+          audioCodec: media.audioCodec ?? '',
+          videoCodec: media.videoCodec ?? '',
+          videoResolution: media.videoResolution ?? '',
+          videoFrameRate: media.videoFrameRate ?? '',
+          container: media.container ?? '',
+          file: file.file ?? '',
+        })
+      }
     }
 
-    const tagType = key.toLowerCase()
-    const tags = value.map((v: any) => v.tag)
-    syncTags(item.ratingKey, tagType, tags)
+    for (const [key, value] of Object.entries(movie)) {
+      if (
+        !Array.isArray(value) ||
+        !value.length ||
+        typeof value[0] !== 'object' ||
+        !('tag' in value[0])
+      ) {
+        continue
+      }
+
+      const tagType = key.toLowerCase()
+
+      for (const v of value as any[]) {
+        const tagName = v.tag
+        const uniqueKey = `${tagType}:${tagName}`
+
+        // Deduplicate tags
+        if (!tagSet.has(uniqueKey)) {
+          tagSet.add(uniqueKey)
+
+          tagsArr.push({
+            tagType,
+            name: tagName,
+          })
+        }
+
+        // ALWAYS create relationship link
+        mediaTagLinks.push({
+          ratingKey: movie.ratingKey,
+          tagType,
+          tagName,
+        })
+      }
+    }
+  }
+  return {
+    moviesArr,
+    mediaArr,
+    mediaFilesArr,
+    tagsArr,
+    mediaTagLinks,
   }
 }
 
-function syncTags(ratingKey: string, tagType: string, tags: string[]) {
-  for (const tag of tags) {
-    upsertTags.run(tagType, tag)
-    const row = getTagId.get(tagType, tag) as TagRow | undefined
+export async function mapPlexShows(plexShows: PlexLibraryItemResponse) {
+  let showsArr: Show[] = []
+  let episodesArr: Episode[] = []
+  let mediaArr: Media[] = []
+  let mediaFilesArr: MediaFiles[] = []
+  let tagsArr: Tags[] = []
+  let mediaTagLinks: MediaTagLink[] = []
+  const shows = plexShows.MediaContainer.Metadata
+  const libraryName = plexShows.MediaContainer.librarySectionTitle
+  const librarySectionKey = plexShows.MediaContainer.librarySectionID
+  const tagSet = new Set<string>()
 
-    if (row) {
-      upsertMediaTags.run(ratingKey, row.id)
+
+  // Loop through every show passed into the mapper
+  for (const show of shows) {
+    // Fetch all the episodes
+    const episodesRes = await getAllEpisodesForShow(show.ratingKey)
+    const episodes = episodesRes.MediaContainer.Metadata
+    for (const episode of episodes) {
+      // For each episode, build a record and push it to episodesArr
+      episodesArr.push({
+        ratingKey: episode.ratingKey,
+        showRatingKey: show.ratingKey,
+        seasonNumber: episode.index ?? 0,
+        episodeNumber: episode.parentIndex ?? 0
+      })
+      // For each movie , build a media record (shared format between movies and tv) and push it to mediaArr
+      mediaArr.push({
+        ratingKey: show.ratingKey,
+        type: episode.type ?? 'other',
+        title: episode.title ?? '',
+        year: episode.year ?? 0,
+        dateAdded: episode.addedAt ?? 0,
+        originallyAvailableAt: episode.originallyAvailableAt ?? '',
+        duration: episode.duration ?? 0,
+        libraryName: libraryName,
+        librarySectionKey: librarySectionKey.toString(),
+        lastRefreshed: Date.now(),
+      })
+
+      // For each media section in a movie, build a media files record for each file and push it to mediaArr
+      for (const media of episode.Media) {
+        for (const file of media.Part) {
+          mediaFilesArr.push({
+            id: media.id,
+            ratingKey: episode.ratingKey,
+            audioCodec: media.audioCodec ?? '',
+            videoCodec: media.videoCodec ?? '',
+            videoResolution: media.videoResolution ?? '',
+            videoFrameRate: media.videoFrameRate ?? '',
+            container: media.container ?? '',
+            file: file.file ?? '',
+          })
+        }
+      }
+      // Build out all of the tags associated to episode
+      for (const [key, value] of Object.entries(episode)) {
+        if (
+          !Array.isArray(value) ||
+          !value.length ||
+          typeof value[0] !== 'object' ||
+          !('tag' in value[0])
+        ) {
+          continue
+        }
+
+        const tagType = key.toLowerCase()
+
+        for (const v of value as any[]) {
+          const tagName = v.tag
+          const uniqueKey = `${tagType}:${tagName}`
+
+          // Deduplicate tags
+          if (!tagSet.has(uniqueKey)) {
+            tagSet.add(uniqueKey)
+
+            tagsArr.push({
+              tagType,
+              name: tagName,
+            })
+          }
+
+          // ALWAYS create relationship link
+          mediaTagLinks.push({
+            ratingKey: episode.ratingKey,
+            tagType,
+            tagName,
+          })
+        }
+      }
     }
+
+    // For each show, build a record and push it to showsArr
+    showsArr.push({
+      ratingKey: show.ratingKey,
+      studio: show.studio ?? '',
+      contentRating: show.contentRating ?? '',
+      contentRatingAge: show.contentRatingAge ?? '',
+      audienceRating: show.audienceRating ?? '',
+      coverPosterUrl:
+        show.Image?.find((img) => img.type === 'coverPoster')?.url ?? '',
+    })
+
+    // Build out all of the tags associated to show
+    for (const [key, value] of Object.entries(show)) {
+      if (
+        !Array.isArray(value) ||
+        !value.length ||
+        typeof value[0] !== 'object' ||
+        !('tag' in value[0])
+      ) {
+        continue
+      }
+
+      const tagType = key.toLowerCase()
+
+      for (const v of value as any[]) {
+        const tagName = v.tag
+        const uniqueKey = `${tagType}:${tagName}`
+
+        // Deduplicate tags
+        if (!tagSet.has(uniqueKey)) {
+          tagSet.add(uniqueKey)
+
+          tagsArr.push({
+            tagType,
+            name: tagName,
+          })
+        }
+
+        // ALWAYS create relationship link
+        mediaTagLinks.push({
+          ratingKey: show.ratingKey,
+          tagType,
+          tagName,
+        })
+      }
+    }
+  }
+  return {
+    showsArr,
+    episodesArr,
+    mediaArr,
+    mediaFilesArr,
+    tagsArr,
+    mediaTagLinks,
   }
 }
 
-export function upsertMoviesBulk(movies: any[]) {
-  const insertMany = db.transaction((movies) => {
-    for (const movie of movies) {
-      upsertMedia.run(movie)
-      upsertMovies.run(movie)
+export function mapPlexEpisodes(plexEpisodes: PlexLibraryItemResponse) {
+  let episodesArr: Episode[] = []
+  let mediaArr: Media[] = []
+  let mediaFilesArr: MediaFiles[] = []
+  let tagsArr: Tags[] = []
+  const episodes = plexEpisodes.MediaContainer.Metadata
+  const libraryName = plexEpisodes.MediaContainer.librarySectionTitle
+  const librarySectionKey = plexEpisodes.MediaContainer.librarySectionID
+
+  // Loop through every episode passed into the mapper
+  for (const episode of episodes) {
+    // For each episode, build a record and push it to showsArr
+    episodesArr.push({
+      ratingKey: episode.ratingKey,
+      showRatingKey: episode.grandparentRatingKey ?? '',
+      seasonNumber: episode.parentIndex ?? 999,
+      episodeNumber: episode.index ?? 999,
+    })
+
+    //For each show , build a media record (shared format between movies and tv) and push it to mediaArr
+    mediaArr.push({
+      ratingKey: episode.ratingKey,
+      type: episode.type ?? '',
+      title: episode.title ?? '',
+      year: episode.year ?? 0,
+      dateAdded: episode.addedAt ?? 0,
+      originallyAvailableAt: episode.originallyAvailableAt ?? '',
+      duration: episode.duration ?? 0,
+      libraryName: libraryName,
+      librarySectionKey: librarySectionKey.toString(),
+      lastRefreshed: Date.now(),
+    })
+
+    //For each media section in a show, build a media files record for each file and push it to mediaArr
+    for (const media of episode.Media) {
+      for (const file of media.Part) {
+        mediaFilesArr.push({
+          id: media.id,
+          ratingKey: episode.ratingKey,
+          audioCodec: media.audioCodec ?? '',
+          videoCodec: media.videoCodec ?? '',
+          videoResolution: media.videoResolution ?? '',
+          videoFrameRate: media.videoFrameRate ?? '',
+          container: media.container ?? '',
+          file: file.file ?? '',
+        })
+      }
+    }
+
+    const tagSet = new Set<string>()
+    for (const [key, value] of Object.entries(episode)) {
+      if (
+        !Array.isArray(value) ||
+        !value.length ||
+        typeof value[0] !== 'object' ||
+        !('tag' in value[0])
+      ) {
+        continue
+      }
+
+      const tagType = key.toLowerCase()
+
+      for (const v of value as any[]) {
+        const tagName = v.tag
+        const uniqueKey = `${tagType}:${tagName}`
+
+        // Deduplicate tags
+        if (!tagSet.has(uniqueKey)) {
+          tagSet.add(uniqueKey)
+
+          tagsArr.push({
+            tagType,
+            name: tagName,
+          })
+        }
+      }
+    }
+  }
+  return {
+    episodesArr,
+    mediaArr,
+    mediaFilesArr,
+    tagsArr,
+  }
+}
+
+/************UPSERTERS************
+ * Inserts data into DB tables
+ *****************************/
+export function upsertMovie(container: MovieContainer) {
+  const { moviesArr, mediaArr, mediaFilesArr, tagsArr, mediaTagLinks } =
+    container
+  const count = {
+    movies: moviesArr.length,
+    media: mediaArr.length,
+    media_files: mediaFilesArr.length,
+    tags: tagsArr.length,
+    media_tags: mediaTagLinks.length,
+  }
+
+  const trx = db.transaction(() => {
+    // 1. Media
+    try {
+      for (const m of mediaArr) {
+        upsertMedia.run(m)
+      }
+    } catch (err) {
+      console.error('Error when upserting to media table: ', err)
+    }
+
+    // 2. Movies
+    try {
+      for (const m of moviesArr) {
+        upsertMovies.run(m)
+      }
+    } catch (err) {
+      console.error('Error when upserting to movies table: ', err)
+    }
+
+    // 3. Media Files
+    try {
+      for (const mf of mediaFilesArr) {
+        upsertMediaFiles.run(mf)
+      }
+    } catch (err) {
+      console.error('Error when upserting to media_files table: ', err)
+    }
+
+    // 4. Tags
+    try {
+      for (const t of tagsArr) {
+        upsertTags.run(t)
+      }
+    } catch (err) {
+      console.error('Error when upserting to tags table: ', err)
+    }
+
+    // 5. Build + insert media_tags
+    try {
+      for (const link of mediaTagLinks) {
+        const row = getTagId.get({
+          tagType: link.tagType,
+          tagName: link.tagName,
+        })
+        if (row) {
+          upsertMediaTags.run({
+            ratingKey: link.ratingKey,
+            tagId: row.id,
+          })
+        }
+      }
+    } catch (err) {
+      console.error('Error when upserting to media_tags table: ', err)
     }
   })
-  insertMany(movies)
-  console.log(`Upserted ${movies.length} movies into the database.`)
-  return true
+
+  trx()
+  return count
 }
 
-// db.exec(`
-//   CREATE TABLE IF NOT EXISTS shows (
-//     ratingKey TEXT PRIMARY KEY,
-//     title TEXT NOT NULL,
-//     year INTEGER,
-//     dateAdded INTEGER,
-//     originallyAvailableAt TEXT,
-//     genres TEXT,
-//     countries TEXT,
-//     directors TEXT,
-//     writers TEXT,
-//     actors TEXT,
-//     studio TEXT,
-//     contentRating TEXT,
-//     contentRatingAge INTEGER,
-//     audienceRating REAL,
-//     tagLine TEXT,
-//     addedAt INTEGER,
-//     audioCodec TEXT,
-//     videoCodec TEXT,
-//     videoResolution TEXT,
-//     videoFrameRate TEXT,
-//     container TEXT,
-//     duration INTEGER,
-//     collections TEXT,
-//     coverPosterUrl TEXT,
-//     file TEXT,
-//     lastRefreshed INTEGER,
-//     libraryName TEXT,
-//     librarySectionKey TEXT
-//    )
-// `)
+export function upsertShow(container: ShowContainer) {
+  const {
+    showsArr,
+    episodesArr,
+    mediaArr,
+    mediaFilesArr,
+    tagsArr,
+    mediaTagLinks,
+  } = container
+  const count = {
+    shows: showsArr.length,
+    episodes: episodesArr.length,
+    media: mediaArr.length,
+    media_files: mediaFilesArr.length,
+    tags: tagsArr.length,
+    media_tags: mediaTagLinks.length,
+  }
 
-// export const upsertShow = db.prepare(`
-//   INSERT INTO shows (
-//     ratingKey,
-//     title,
-//     year,
-//     dateAdded,
-//     originallyAvailableAt,
-//     genres,
-//     countries,
-//     directors,
-//     writers,
-//     actors,
-//     studio,
-//     contentRating,
-//     contentRatingAge,
-//     audienceRating,
-//     tagLine,
-//     addedAt,
-//     audioCodec,
-//     videoCodec,
-//     videoResolution,
-//     videoFrameRate,
-//     container,
-//     duration,
-//     collections,
-//     coverPosterUrl,
-//     file,
-//     lastRefreshed,
-//     libraryName,
-//     librarySectionKey
-//   ) VALUES (
-//     @ratingKey,
-//     @title,
-//     @year,
-//     @dateAdded,
-//     @originallyAvailableAt,
-//     @genres,
-//     @countries,
-//     @directors,
-//     @writers,
-//     @actors,
-//     @studio,
-//     @contentRating,
-//     @contentRatingAge,
-//     @audienceRating,
-//     @tagLine,
-//     @addedAt,
-//     @audioCodec,
-//     @videoCodec,
-//     @videoResolution,
-//     @videoFrameRate,
-//     @container,
-//     @duration,
-//     @collections,
-//     @coverPosterUrl,
-//     @file,
-//     @lastRefreshed,
-//     @libraryName,
-//     @librarySectionKey
-//   )
-//   ON CONFLICT(ratingKey) DO UPDATE SET
-//     title = excluded.title,
-//     year = excluded.year,
-//     dateAdded = excluded.dateAdded,
-//     originallyAvailableAt = excluded.originallyAvailableAt,
-//     genres = excluded.genres,
-//     countries = excluded.countries,
-//     directors = excluded.directors,
-//     writers = excluded.writers,
-//     actors = excluded.actors,
-//     studio = excluded.studio,
-//     contentRating = excluded.contentRating,
-//     contentRatingAge = excluded.contentRatingAge,
-//     audienceRating = excluded.audienceRating,
-//     tagLine = excluded.tagLine,
-//     addedAt = excluded.addedAt,
-//     audioCodec = excluded.audioCodec,
-//     videoCodec = excluded.videoCodec,
-//     videoResolution = excluded.videoResolution,
-//     videoFrameRate = excluded.videoFrameRate,
-//     container = excluded.container,
-//     duration = excluded.duration,
-//     collections = excluded.collections,
-//     coverPosterUrl = excluded.coverPosterUrl,
-//     file = excluded.file,
-//     lastRefreshed = excluded.lastRefreshed,
-//     libraryName = excluded.libraryName,
-//     librarySectionKey = excluded.librarySectionKey
-// `)
+  const trx = db.transaction(() => {
+    // 1. Media
+    try {
+      for (const m of mediaArr) {
+        upsertMedia.run(m)
+      }
+    } catch (err) {
+      console.error('Error when upserting to media table: ', err)
+    }
 
+    // 2. Shows
+    try {
+      for (const m of showsArr) {
+        upsertShows.run(m)
+      }
+    } catch (err) {
+      console.error('Error when upserting to shows table: ', err)
+    }
+
+    // 3. Episodes
+    try {
+      for (const m of episodesArr) {
+        upsertEpisodes.run(m)
+      }
+    } catch (err) {
+      console.error('Error when upserting to episodes table: ', err)
+    }
+
+    // 4. Media Files
+    try {
+      for (const mf of mediaFilesArr) {
+        upsertMediaFiles.run(mf)
+      }
+    } catch (err) {
+      console.error('Error when upserting to media_files table: ', err)
+    }
+
+    // 5. Tags
+    try {
+      for (const t of tagsArr) {
+        upsertTags.run(t)
+      }
+    } catch (err) {
+      console.error('Error when upserting to tags table: ', err)
+    }
+
+    // 6. Build + insert media_tags
+    try {
+      for (const link of mediaTagLinks) {
+        const row = getTagId.get({
+          tagType: link.tagType,
+          tagName: link.tagName,
+        })
+        if (row) {
+          upsertMediaTags.run({
+            ratingKey: link.ratingKey,
+            tagId: row.id,
+          })
+        }
+      }
+    } catch (err) {
+      console.error('Error when upserting to media_tags table: ', err)
+    }
+  })
+
+  trx()
+  return count
+}
+
+// REMOVE
 export function upsertShowsBulk(shows: any[]) {
   const insertMany = db.transaction((shows) => {
     for (const show of shows) {
@@ -341,6 +555,7 @@ export function upsertShowsBulk(shows: any[]) {
   return true
 }
 
+// REMOVE
 export async function updateAllShowsInSection(
   allItems: PlexLibraryItemResponse,
 ): Promise<boolean> {
@@ -396,143 +611,24 @@ export async function updateAllShowsInSection(
   }
 }
 
-function mapPlexMovie(
-  plexMovie: PlexLibraryItem,
-  libraryName: string,
-  librarySectionKey: string,
-) {
-  let mediaFiles = []
-  for (const mediaItem of plexMovie.Media) {
-    mediaFiles.push({
-      ratingKey: plexMovie.ratingKey,
-      type: plexMovie.type,
-      title: plexMovie.title,
-      year: plexMovie.year,
-      dateAdded: plexMovie.addedAt,
-      originallyAvailableAt: plexMovie.originallyAvailableAt,
-      duration: plexMovie.duration,
-      libraryName: libraryName,
-      librarySectionKey: librarySectionKey,
-      lastRefreshed: plexMovie.updatedAt,
-    })
-  }
-  return {
-    media: {
-      ratingKey: plexMovie.ratingKey,
-      type: plexMovie.type,
-      title: plexMovie.title,
-      year: plexMovie.year,
-      dateAdded: plexMovie.addedAt,
-      originallyAvailableAt: plexMovie.originallyAvailableAt,
-      duration: plexMovie.duration,
-      libraryName: libraryName,
-      librarySectionKey: librarySectionKey,
-      //file: plexMovie.Media.,
-      lastRefreshed: plexMovie.updatedAt,
-    },
-    movie: {
-      ratingKey: plexMovie.ratingKey,
-      studio: plexMovie.studio,
-      tagline: plexMovie.tagline,
-      contentRating: plexMovie.contentRating,
-      contentRatingAge: plexMovie.contentRatingAge,
-      audienceRating: plexMovie.audienceRating,
-      coverPosterUrl: plexMovie.thumb,
-    },
-  }
-}
-
-export async function updateAllMoviesInSection(
+export async function refreshAllItemsInSection(
   allItems: PlexLibraryItemResponse,
 ): Promise<boolean> {
   try {
+    let attempting = ''
     if (allItems.MediaContainer.viewGroup === 'movie') {
-      // Loop through all movies and see if any of them have multiple media entries (e.g. different versions of the same movie) - if so, we want to upsert each media entry as a separate movie in the database with the same ratingKey but different file paths and metadata
-      for (const item of allItems.MediaContainer.Metadata) {
-        if (item.Media.length > 1) {
-          console.warn(
-            `Item ${item.title} has multiple media entries. This may indicate multiple versions of the same movie. Upserting each media entry as a separate movie in the database.`,
-          )
-        }
-      }
-
-      const media = {
-        ratingKey: '',
-        type: '',
-        title: '',
-        year: '',
-        dateAdded: '',
-        originallyAvailableAt: '',
-        duration: '',
-        libraryName: '',
-        librarySectionKey: '',
-        lastRefreshed: '',
-      }
-
-      const mediaFiles = {
-        id: '',
-        ratingKey: '',
-        audioCodec: '',
-        videoCodec: '',
-        videoResolution: '',
-        videoFrameRate: '',
-        container: '',
-        file: '',
-      }
-
-      const tags = {
-        id: '',
-        tagType: '',
-        name: '',
-      }
-
-      const mediaTags = {
-        ratingKey: '',
-        tagId: '',
-      }
-
-      const movies: Movies[] = allItems.MediaContainer.Metadata.map((item) => ({
-        ratingKey: item.ratingKey,
-        title: item.title,
-        year: item.year,
-        dateAdded: item.addedAt,
-        originallyAvailableAt: item.originallyAvailableAt,
-        genres: item.Genre ? item.Genre.map((g: any) => g.tag).join(', ') : '',
-        countries: item.Country
-          ? item.Country.map((c: any) => c.tag).join(', ')
-          : '',
-        directors: item.Director
-          ? item.Director.map((d: any) => d.tag).join(', ')
-          : '',
-        writers: item.Writer
-          ? item.Writer.map((w: any) => w.tag).join(', ')
-          : '',
-        actors: item.Role ? item.Role.map((r: any) => r.tag).join(', ') : '',
-        studio: item.studio ?? '',
-        contentRating: item.contentRating ?? '',
-        contentRatingAge: item.contentRatingAge ?? 0,
-        audienceRating: item.audienceRating ?? 0,
-        tagLine: item.tagline ?? '',
-        addedAt: item.addedAt,
-        //lastViewedAt: 0, // item.lastViewedAt,
-        //playCount: 0, // item.playCount,
-        audioCodec: item.Media[0].audioCodec,
-        videoCodec: item.Media[0].videoCodec,
-        videoResolution: item.Media[0].videoResolution,
-        videoFrameRate: item.Media[0].videoFrameRate,
-        container: item.Media[0].container,
-        duration: item.Media[0].duration,
-        collections: item.Collection
-          ? item.Collection.map((c) => c.tag).join(', ')
-          : '',
-        coverPosterUrl: item.thumb ?? '',
-        file: item.Media[0].Part[0].file,
-        lastRefreshed: Date.now(),
-        libraryName: allItems.MediaContainer.librarySectionTitle,
-        librarySectionKey: allItems.MediaContainer.librarySectionID.toString(),
-      }))
-
-      upsertMoviesBulk(movies)
+      upsertMovie(mapPlexMovies(allItems))
+      attempting = `movies`
+    } else if (allItems.MediaContainer.viewGroup === 'show') {
+      //upsertShow(mapPlexShows(allItems))
+      attempting = `shows`
+    } else if (allItems.MediaContainer.viewGroup === 'artist') {
+      //upsertMovie(mapPlexMovies(allItems))
+      console.log('Music implementation is not ready yet')
+      attempting = `music`
+    } else {
+      console.log('Other implementation is not ready yet')
+      attempting = `other`
     }
     return true
   } catch (err: unknown) {

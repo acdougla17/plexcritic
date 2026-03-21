@@ -3,6 +3,7 @@ import { config } from './config.js'
 import healthRouter from './routes/healthCheck.js'
 import getAllEpisodesForShowRouter from './routes/getFromPlex.js'
 import refreshLibraryRouter from './routes/refreshLibrary.js'
+import testRouter from './routes/test.js'
 import path from 'node:path'
 
 const app = express()
@@ -15,6 +16,12 @@ const routesArray = [
     hasParams: false,
     name: 'Health Check',
     description: 'Check server health and uptime',
+  },
+  {
+    path: '/test',
+    hasParams: false,
+    name: 'Test',
+    description: 'Runs whatever current test code I am working on',
   },
   {
     path: '/getFromPlex/getAllLibraries',
@@ -96,3 +103,4 @@ app.listen(port, () => {
 app.use('/health', healthRouter)
 app.use('/getFromPlex', getAllEpisodesForShowRouter)
 app.use('/refreshLibrary', refreshLibraryRouter)
+app.use('/test', testRouter)

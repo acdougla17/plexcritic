@@ -33,14 +33,14 @@ CREATE TABLE IF NOT EXISTS "media" (
 );
 CREATE TABLE IF NOT EXISTS "media_files" (
 	"id"	INTEGER,
-	"ratingKey"	INTEGER,
+	"ratingKey"	TEXT,
 	"audioCodec"	TEXT,
 	"videoCodec"	TEXT,
 	"videoResolution"	TEXT,
 	"videoFrameRate"	INTEGER,
 	"container"	TEXT,
 	"file"	TEXT,
-	PRIMARY KEY("id" AUTOINCREMENT),
+	PRIMARY KEY("id"),
 	FOREIGN KEY("ratingKey") REFERENCES "media"("ratingKey")
 );
 CREATE TABLE IF NOT EXISTS "media_tags" (
@@ -101,7 +101,8 @@ CREATE TABLE IF NOT EXISTS "tags" (
 	"id"	INTEGER,
 	"tagType"	TEXT,
 	"name"	TEXT,
-	PRIMARY KEY("id" AUTOINCREMENT)
+	PRIMARY KEY("id" AUTOINCREMENT),
+	UNIQUE("tagType","name")
 );
 CREATE INDEX IF NOT EXISTS "idx_media_dateAdded" ON "media" (
 	"dateAdded"

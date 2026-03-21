@@ -130,11 +130,18 @@ export interface PlexLibraryItemResponse {
     allowSync: boolean
     art: string
     identifier: string
+    key?: string
     librarySectionID: number
     librarySectionTitle: string
     librarySectionUUID: string
     mediaTagPrefix: string
     mediaTagVersion: number
+    mixedParents?: boolean
+    nocache?: boolean
+    parentIndex?: number
+    parentTitle?: string
+    parentYear?: number
+    theme?: string
     size: number
     thumb: string
     title1: string
@@ -152,7 +159,12 @@ export interface PlexLibraryItem {
   contentRating: string
   duration: number
   key: string
+  parentRatingKey?: string
+  grandparentRatingKey?: string
   originallyAvailableAt: string
+  index?: number
+  parentIndex?: number
+  lastViewedAt: number
   leafCount?: number
   viewedLeafCount?: number
   childCount?: number

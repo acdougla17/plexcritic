@@ -15,7 +15,7 @@ export function getUpsertMediaQuery() {
         lastRefreshed
     ) VALUES (
         @ratingKey, 
-        'movie', 
+        @type, 
         @title, 
         @year, 
         @dateAdded,
@@ -41,7 +41,6 @@ export function getDeleteMediaQuery() {
  * *******************************************/
 export function getUpsertMediaFilesQuery() {
   return `INSERT INTO media_files (
-        id,
         ratingKey, 
         audioCodec,
         videoCodec,
@@ -56,11 +55,11 @@ export function getUpsertMediaFilesQuery() {
         @container,
         @file
     )
-    ON CONFLICT(ratingKey) DO UPDATE SET
+    ON CONFLICT(id) DO UPDATE SET
         audioCodec = excluded.audioCodec,
         videoCodec = excluded.videoCodec,
         videoResolution = excluded.videoResolution,
-        container =  = excluded.container,
+        container =  excluded.container,
         file = excluded.file`
 }
 
@@ -76,7 +75,9 @@ export function getDeleteMediaByIdQuery() {
  * Queries for 'media_tags' table
  * *******************************************/
 export function getUpsertMediaTagsQuery() {
-  return `INSERT OR IGNORE INTO media_files VALUES (@ratingKey, @tagId)`
+  return `INSERT INTO media_tags (ratingKey, tagId)
+  VALUES (@ratingKey, @tagId)
+  ON CONFLICT DO NOTHING`
 }
 
 export function getDeleteMediaTagsQuery() {
@@ -152,7 +153,7 @@ export function getDeleteShowsQuery() {
  * Queries for 'episodes' table
  * *******************************************/
 export function getUpsertEpisodesQuery() {
-  return `INSERT INTO shows (
+  return `INSERT INTO episodes (
         ratingKey, 
         showRatingKey,
         seasonNumber,
@@ -212,15 +213,14 @@ export function getDeleteCriticReviewsByIdQuery() {
  * Queries for 'tags' table
  * *******************************************/
 export function getUpsertTagsQuery() {
-  return `INSERT INTO media_files (
-        id, 
+  return `INSERT INTO tags (
         tagType,
         name
     ) VALUES (
         @tagType, 
         @name
     )
-    ON CONFLICT(ratingKey) DO UPDATE SET
+    ON CONFLICT(tagType,name) DO UPDATE SET
         tagType = excluded.tagType,
         name = excluded.name`
 }
@@ -230,7 +230,7 @@ export function getDeleteTagsQuery() {
 }
 
 export function getTagId() {
-  return `SELECT id FROM tags WHERE tagType = @tagType AND name = @name`
+  return `SELECT id FROM tags WHERE tagType = @tagType AND name = @tagName`
 }
 
 /*********************************************
