@@ -5,6 +5,7 @@ import getAllEpisodesForShowRouter from './routes/getFromPlex.js'
 import refreshLibraryRouter from './routes/refreshLibrary.js'
 import testRouter from './routes/test.js'
 import dbRouter from './routes/db.js'
+import tuners from './routes/tuners.js'
 import path from 'node:path'
 
 const app = express()
@@ -73,6 +74,20 @@ const routesArray = [
     description:
       'Deletes all rows from local SQLite database table',
   },
+  {
+    path: '/tuners',
+    hasParams: false,
+    name: 'Get Tuners',
+    description:
+      'Fetches information about available tuner devices',
+  },
+  {
+    path: '/tuners/remove/:tunerId',
+    hasParams: false,
+    name: 'Remove Tuner',
+    description:
+      'Removes a tuner device from the system',
+  },
 ]
 
 // Function to generate the HTML for the home page, listing available routes and their descriptions
@@ -120,3 +135,4 @@ app.use('/getFromPlex', getAllEpisodesForShowRouter)
 app.use('/refreshLibrary', refreshLibraryRouter)
 app.use('/test', testRouter)
 app.use('/db', dbRouter)
+app.use('/tuners', tuners)

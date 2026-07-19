@@ -274,3 +274,16 @@ export interface PlexShowItem {
   Collection?: [PlexTag]
   Role?: [PlexTag]
 }
+
+export interface TunersResponse {
+  MediaContainer: {
+    size: number
+    Device: TunerDevice[]
+  }
+}
+
+export interface TunerDevice {
+  key: string
+  uri: string
+  // ...other fields from the XML/JSON
+}

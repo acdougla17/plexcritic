@@ -4,17 +4,35 @@ import type {
   PlexLibrary,
   PlexLibraryResponse,
   PlexLibraryItemResponse,
+  TunersResponse
 } from '../types/plex.js'
 
-export async function makePlexRequest<T>(endpoint: string): Promise<T> {
+export async function makePlexRequest<T>(endpoint: string, requestType = 'GET', additionalParams?: Record<string, string>): Promise<T> {
   const plexIp = config.plexUrl
   const plexPort = config.plexPort
   const plexToken = config.plexToken
 
-  const url = `http://${plexIp}:${plexPort}${endpoint}?X-Plex-Token=${plexToken}`
+  const url = `http://${plexIp}:${plexPort}${endpoint}`
   try {
-    const response = await axios.get<T>(url)
-    return response.data
+    if(requestType === 'POST') {
+      const response = await axios.post<T>(url, null, {
+        params: { 'X-Plex-Token': plexToken, ...additionalParams },
+        headers: { Accept: 'application/json' }
+      })
+      return response.data
+    } else if(requestType === 'DELETE') {
+      const response = await axios.delete<T>(url, {
+        params: { 'X-Plex-Token': plexToken, ...additionalParams },
+        headers: { Accept: 'application/json' }
+      })
+      return response.data
+    } else {
+      const response = await axios.get<T>(url, {
+        params: { 'X-Plex-Token': plexToken, ...additionalParams },
+        headers: { Accept: 'application/json' }
+      })
+      return response.data
+    }
   } catch (err: unknown) {
     console.error(`MPR1: Error making Plex request to ${endpoint}:`)
     throw err
@@ -107,4 +125,29 @@ export async function getAllEpisodesForShow(
   }
 }
 
+export async function getAllTuners(): Promise<any> {
+  /* Sample CURL
+  curl -s "http://192.168.1.100:32469/media/grabbers/devices?X-Plex-Token=YOUR_PLEX_TOKEN" \ | xmllint --format - 2</dev/null | grep -E 'MediaContainer size=|key=|uri='
+  */
+ console.log('Fetching all tuners from Plex...')
+ const endpoint = `/media/grabbers/devices`
+  try {
+    const response = await makePlexRequest<TunersResponse>(endpoint)
+    return response
+  } catch (err: unknown) {
+    console.error(`Error fetching all tuners:`, err)
+    throw err
+  }
+}
 
+export async function removeTuner(tunerId: string): Promise<any> {
+console.log(`Removing tuner with ID: ${tunerId} from Plex...`)
+  const endpoint = `/media/grabbers/devices/${tunerId}`
+  try {
+    const response = await makePlexRequest<TunersResponse>(endpoint,'DELETE',{ 'X-Plex-Token': config.plexToken})
+    return response
+  } catch (err: unknown) {
+    console.error(`Error removing tuner with ID ${tunerId}:`, err)
+    throw err
+  }
+}
