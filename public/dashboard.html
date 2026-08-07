@@ -81,6 +81,29 @@
         background: #eef6ff;
         color: #0f4c81;
       }
+      .result-box {
+        margin-top: 16px;
+        padding: 14px;
+        border-radius: 10px;
+        background: #f5f5f5;
+        border: 1px solid #d0d0d0;
+        max-height: 400px;
+        overflow-y: auto;
+        font-family: 'Courier New', monospace;
+        font-size: 0.9rem;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .result-box.error {
+        background: #ffe8e0;
+        border-color: #d0d0d0;
+        color: #a12a14;
+      }
+      .result-box.success {
+        background: #f0f9ff;
+        border-color: #0078d4;
+        color: #003366;
+      }
       .wide {
         grid-column: 1 / -1;
       }
@@ -122,6 +145,17 @@
         <div style="margin-top: 16px;">
           <button id="refreshAll">Refresh All Libraries</button>
         </div>
+
+      </section>
+
+      <section class="card">
+        <h2>Test Plex Endpoint</h2>
+        <div>
+          <label for="endpointInput">Plex API endpoint</label>
+          <input id="endpointInput" placeholder="/library/metadata/4" />
+          <button id="testEndpointButton">Test Endpoint</button>
+        </div>
+        <div id="endpointResultContainer" style="margin-top: 16px;"></div>
       </section>
     </div>
 

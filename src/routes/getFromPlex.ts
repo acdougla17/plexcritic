@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import type { Request, Response, NextFunction } from 'express'
-import { getAllEpisodesForShow, getAllItemsInSection, getItemDetails, getPlexLibrary } from '../connectors/plex.js'
+import { getAllEpisodesForShow, getAllItemsInSection, getItemDetails, getPlexLibrary, makePlexRequest } from '../connectors/plex.js'
 
 const router = Router()
 
@@ -75,6 +75,21 @@ router.get('/itemDetails/:ratingKey', async (_req: Request, res: Response, _next
   } catch (err: unknown) {
     res.statusMessage = err instanceof Error ? err.message : 'Error'
     res.status(503).send()
+  }
+})
+
+// Route for testing Plex endpoints
+router.get('/raw', async (_req: Request, res: Response, _next: NextFunction) => {
+  const endpoint = _req.query.endpoint as string
+  if (!endpoint || !endpoint.startsWith('/')) {
+    res.status(400).send({ error: 'Provide ?endpoint=/library/metadata/4' })
+    return
+  }
+  try {
+    const data = await makePlexRequest(endpoint)
+    res.send(data)
+  } catch (err: unknown) {
+    res.status(503).send({ error: err instanceof Error ? err.message : 'Error' })
   }
 })
 

@@ -7,4 +7,5 @@ export const config = {
   plexUrl: process.env.PLEX_URL!,
   plexPort: process.env.PLEX_PORT!,
   plexToken: process.env.PLEX_TOKEN!,
+  dbPath: process.env.DB_PATH || "plexcriticv2.db",
 };
