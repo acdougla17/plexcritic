@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import type { Request, Response, NextFunction } from 'express'
-import { clearDatabase } from '../db/database.js'
+import { clearDatabase, getDatabaseStats } from '../db/database.js'
 
 const router = Router()
 
@@ -36,5 +36,15 @@ router.get('/removeAll/', async (_req: Request, res: Response, _next: NextFuncti
   }
 })
 
+router.get('/stats', (_req: Request, res: Response, _next: NextFunction) => {
+  console.log('--- /db/stats route called ---')
+  try {
+    const stats = getDatabaseStats()
+    res.send(stats)
+  } catch (err: unknown) {
+    res.statusMessage = err instanceof Error ? err.message : 'Error'
+    res.status(503).send()
+  }
+})
 
 export default router

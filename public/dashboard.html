@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Plex Critic Dashboard</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 24px;
+        background: #f4f7fb;
+        color: #20232a;
+      }
+      header {
+        margin-bottom: 24px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 2rem;
+      }
+      .grid {
+        display: grid;
+        gap: 20px;
+      }
+      .card {
+        background: #fff;
+        border-radius: 14px;
+        box-shadow: 0 12px 30px rgba(24, 36, 71, 0.08);
+        padding: 20px;
+      }
+      .card h2 {
+        margin-top: 0;
+      }
+      label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 600;
+      }
+      select,
+      input,
+      button,
+      textarea {
+        width: 100%;
+        font-size: 1rem;
+        padding: 10px 12px;
+        border: 1px solid #d9e1ec;
+        border-radius: 8px;
+        background: #fff;
+        box-sizing: border-box;
+      }
+      button {
+        cursor: pointer;
+        border: none;
+        color: #fff;
+        font-weight: 700;
+        background: #0078d4;
+        transition: background 0.2s ease;
+      }
+      button:hover {
+        background: #005bb5;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+      }
+      th,
+      td {
+        padding: 10px 12px;
+        border-bottom: 1px solid #e7ecf4;
+        text-align: left;
+      }
+      th {
+        background: #f8fbff;
+      }
+      .status {
+        margin-top: 16px;
+        padding: 14px;
+        border-radius: 10px;
+        background: #eef6ff;
+        color: #0f4c81;
+      }
+      .wide {
+        grid-column: 1 / -1;
+      }
+      @media (min-width: 900px) {
+        .grid-2 {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Plex Critic Dashboard</h1>
+      <p>View database counts and refresh Plex libraries with quick controls.</p>
+    </header>
+
+    <div class="grid grid-2">
+      <section class="card">
+        <h2>Database Stats</h2>
+        <div id="statsContainer">Loading stats...</div>
+      </section>
+
+      <section class="card">
+        <h2>Library Refresh</h2>
+        <div>
+          <label for="librarySelect">Select a section to refresh</label>
+          <select id="librarySelect">
+            <option value="">Loading libraries...</option>
+          </select>
+          <button id="refreshSelected">Refresh Selected Section</button>
+        </div>
+
+        <div style="margin-top: 16px;">
+          <label for="manualKeys">Refresh custom section keys</label>
+          <input id="manualKeys" placeholder="e.g. 2,5,7" />
+          <button id="refreshCustom">Refresh Custom Keys</button>
+        </div>
+
+        <div style="margin-top: 16px;">
+          <button id="refreshAll">Refresh All Libraries</button>
+        </div>
+      </section>
+    </div>
+
+    <section class="card wide">
+      <h2>Last Action</h2>
+      <div id="statusMessage" class="status">Ready.</div>
+    </section>
+
+    <script src="/dashboard.js"></script>
+  </body>
+</html>

@@ -56,6 +56,7 @@ router.get('/allLibraryItems/:sectionKey', async (_req: Request, res: Response, 
     res.statusMessage = err instanceof Error ? err.message : 'Error'
     res.status(503).send()
   }
+  console.log('--- /getFromPlex/allLibraryItems route complete ---')
 })
 
 // Route to fetch detailed information for a specific Plex library item by providing the ratingKey as a URL parameter

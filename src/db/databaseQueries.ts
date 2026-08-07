@@ -41,6 +41,7 @@ export function getDeleteMediaQuery() {
  * *******************************************/
 export function getUpsertMediaFilesQuery() {
   return `INSERT INTO media_files (
+        id,
         ratingKey, 
         audioCodec,
         videoCodec,
@@ -48,6 +49,7 @@ export function getUpsertMediaFilesQuery() {
         container,
         file
     ) VALUES (
+        @id,
         @ratingKey, 
         @audioCodec,
         @videoCodec,
@@ -186,14 +188,16 @@ export function getUpsertCriticReviewsQuery() {
         reviewDate,
         category
     ) VALUES (
+        @id,
         @ratingKey, 
         @criticName,
         @score,
-        @reviewText
+        @reviewText,
         @reviewDate,
         @category
     )
-    ON CONFLICT(ratingKey) DO UPDATE SET
+    ON CONFLICT(id) DO UPDATE SET
+        ratingKey = excluded.ratingKey,
         criticName = excluded.criticName,
         score = excluded.score,
         reviewText = excluded.reviewText,

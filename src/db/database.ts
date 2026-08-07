@@ -27,6 +27,8 @@ export const db = new Database(dbPath)
 const schema = fs.readFileSync('./plexcriticv2.db.sql', 'utf8')
 db.exec(schema)
 
+db.pragma('foreign_keys = ON')
+
 // Prepare DB queries
 const upsertMedia = db.prepare(Queries.getUpsertMediaQuery())
 //const deleteMedia = db.prepare(Queries.getDeleteMediaQuery())
@@ -167,12 +169,12 @@ export async function mapPlexShows(plexShows: PlexLibraryItemResponse) {
       episodesArr.push({
         ratingKey: episode.ratingKey,
         showRatingKey: show.ratingKey,
-        seasonNumber: episode.index ?? 0,
-        episodeNumber: episode.parentIndex ?? 0,
+        seasonNumber: episode.parentIndex ?? 0,
+        episodeNumber: episode.index ?? 0,
       })
-      // For each movie , build a media record (shared format between movies and tv) and push it to mediaArr
+      // For each media file, build a media record (shared format between movies and tv) and push it to mediaArr
       mediaArr.push({
-        ratingKey: show.ratingKey,
+        ratingKey: episode.ratingKey,
         type: episode.type ?? 'other',
         title: episode.title ?? '',
         year: episode.year ?? 0,
@@ -247,6 +249,20 @@ export async function mapPlexShows(plexShows: PlexLibraryItemResponse) {
         show.Image?.find((img) => img.type === 'coverPoster')?.url ?? '',
     })
 
+    // Also create a media record for the show so the shows foreign key can be satisfied
+    mediaArr.push({
+      ratingKey: show.ratingKey,
+      type: show.type ?? 'show',
+      title: show.title ?? '',
+      year: show.year ?? 0,
+      dateAdded: show.addedAt ?? 0,
+      originallyAvailableAt: show.originallyAvailableAt ?? '',
+      duration: show.duration ?? 0,
+      libraryName: libraryName,
+      librarySectionKey: librarySectionKey.toString(),
+      lastRefreshed: Date.now(),
+    })
+
     // Build out all of the tags associated to show
     for (const [key, value] of Object.entries(show)) {
       if (
@@ -290,7 +306,7 @@ export async function mapPlexShows(plexShows: PlexLibraryItemResponse) {
     mediaFilesArr,
     tagsArr,
     mediaTagLinks,
-  }
+  } as ShowContainer
 }
 
 export function mapPlexEpisodes(plexEpisodes: PlexLibraryItemResponse) {
@@ -620,7 +636,7 @@ export async function refreshAllItemsInSection(
       upsertMovie(mapPlexMovies(allItems))
       attempting = `movies`
     } else if (allItems.MediaContainer.viewGroup === 'show') {
-      //upsertShow(mapPlexShows(allItems))
+      upsertShow(await mapPlexShows(allItems))
       attempting = `shows`
     } else if (allItems.MediaContainer.viewGroup === 'artist') {
       //upsertMovie(mapPlexMovies(allItems))
@@ -635,6 +651,29 @@ export async function refreshAllItemsInSection(
     console.error(`Error upserting items in section ${allItems}:`, err)
     throw err
   }
+}
+
+export function getDatabaseStats() {
+  const tables = [
+    'media',
+    'movies',
+    'shows',
+    'episodes',
+    'media_files',
+    'tags',
+    'media_tags',
+    'critic_reviews',
+    'sync_log',
+    'music_tracks',
+    'music_albums',
+    'music_artists',
+  ]
+
+  return tables.reduce((acc, table) => {
+    const row = db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count?: number } | undefined
+    acc[table] = typeof row?.count === 'number' ? row.count : 0
+    return acc
+  }, {} as Record<string, number>)
 }
 
 /************CLEANERS************

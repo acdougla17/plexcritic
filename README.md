@@ -25,50 +25,6 @@ This project is to create a Plex critic that will analyze your collection like a
 
 ---
 
-## 2. Bugs to fix before building analytics on this data
-
-These matter because analytics and the critic engine will both read from these tables — better to fix now than debug weird stats later.
-
-**Bug 1 — episode `media` rows are keyed to the wrong ratingKey.**
-In `mapPlexShows` (`database.ts`), when building the `media` record for each episode, `ratingKey` is set to `show.ratingKey` instead of `episode.ratingKey`:
-```ts
-mediaArr.push({
-  ratingKey: show.ratingKey,   // should be episode.ratingKey
-  ...
-})
-```
-But the `media_files` record for that same episode correctly uses `episode.ratingKey`. Since `episodes.ratingKey` has a foreign key to `media.ratingKey`, and `media_files.ratingKey` also has a foreign key to `media.ratingKey`, this mismatch means episode-level media rows would either collide with the show's own row or leave `media_files` pointing at a `ratingKey` that was never inserted into `media`. Worth fixing before turning shows/music sync back on.
-
-**Bug 2 — `seasonNumber`/`episodeNumber` look swapped.**
-Still in `mapPlexShows`:
-```ts
-episodesArr.push({
-  ...
-  seasonNumber: episode.index ?? 0,
-  episodeNumber: episode.parentIndex ?? 0,
-})
-```
-In Plex's API, `parentIndex` is conventionally the season number and `index` is the episode number within that season — so this looks reversed. Worth a quick check against a real Plex response before you re-enable show syncing, since "most frequent director" type stats will be fine either way, but any "S2E4" display in the frontend would be wrong.
-
-**Bug 3 — `media_files` upsert will duplicate rows on every re-sync.**
-```sql
-INSERT INTO media_files (ratingKey, audioCodec, videoCodec, videoResolution, container, file)
-VALUES (...)
-ON CONFLICT(id) DO UPDATE SET ...
-```
-`id` isn't in the column list, so SQLite can't detect a conflict on it — every sync will insert a fresh row per file instead of updating the existing one. Since `id` is autoincrement, either add a natural unique constraint (e.g. `UNIQUE(ratingKey, file)`) and conflict on that, or look up the existing row's `id` before upserting.
-
-**Bug 4 — `critic_reviews` upsert query is malformed.**
-```sql
-INSERT INTO critic_reviews (id, ratingKey, criticName, score, reviewText, reviewDate, category)
-VALUES (@ratingKey, @criticName, @score, @reviewText @reviewDate, @category)
-```
-Column list has 7 entries, the VALUES list only binds 6 (missing comma after `@reviewText`), and it conflicts on `ratingKey` even though `ratingKey` has no unique constraint on that table (only `id` is a key, and it's autoincrement, not something you'd insert by hand). This one isn't wired up anywhere yet, so it hasn't bitten you — but it'll need a rewrite before phase 6.
-
-None of these are urgent to fix today, but they're exactly the kind of thing that quietly poisons an "avg days to first watch" or "top director" stat, so I'd knock them out before phase 5.
-
----
-
 ## 3. Schema you already have (for reference)
 
 ```

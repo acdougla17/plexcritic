@@ -10,6 +10,7 @@ import path from 'node:path'
 
 const app = express()
 const port = config.port
+app.use(express.static(path.join(process.cwd(), 'public')))
 
 // Add routes here to display on home page
 const routesArray = [
@@ -82,6 +83,13 @@ const routesArray = [
       'Fetches information about available tuner devices',
   },
   {
+    path: '/dashboard',
+    hasParams: false,
+    name: 'Dashboard',
+    description:
+      'Open the live database dashboard with stats and library refresh controls',
+  },
+  {
     path: '/tuners/remove/:tunerId',
     hasParams: false,
     name: 'Remove Tuner',
@@ -123,6 +131,10 @@ function generateHomePage() {
 
 app.get('/', (req, res) => {
   res.send(generateHomePage())
+})
+
+app.get('/dashboard', (_req, res) => {
+  res.sendFile(path.join(process.cwd(), 'public', 'dashboard.html'))
 })
 
 app.listen(port, () => {
