@@ -125,6 +125,38 @@ export async function getAllEpisodesForShow(
   }
 }
 
+export async function getChildrenForArtist(
+  ratingKey: string,
+): Promise<PlexLibraryItemResponse> {
+  const endpoint = `/library/metadata/${ratingKey}/children`
+  try {
+    const response: PlexLibraryItemResponse = await makePlexRequest(endpoint)
+    return response
+  } catch (err: unknown) {
+    console.error(
+      `Error fetching albums for artist with ratingKey ${ratingKey}:`,
+      err,
+    )
+    throw err
+  }
+}
+
+export async function getChildrenForAlbum(
+  ratingKey: string,
+): Promise<PlexLibraryItemResponse> {
+  const endpoint = `/library/metadata/${ratingKey}/children`
+  try {
+    const response: PlexLibraryItemResponse = await makePlexRequest(endpoint)
+    return response
+  } catch (err: unknown) {
+    console.error(
+      `Error fetching tracks for album with ratingKey ${ratingKey}:`,
+      err,
+    )
+    throw err
+  }
+}
+
 export async function getAllTuners(): Promise<any> {
   /* Sample CURL
   curl -s "http://192.168.1.100:32469/media/grabbers/devices?X-Plex-Token=YOUR_PLEX_TOKEN" \ | xmllint --format - 2</dev/null | grep -E 'MediaContainer size=|key=|uri='

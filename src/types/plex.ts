@@ -161,6 +161,8 @@ export interface PlexLibraryItem {
   key: string
   parentRatingKey?: string
   grandparentRatingKey?: string
+  parentTitle?: string
+  grandparentTitle?: string
   originallyAvailableAt: string
   index?: number
   parentIndex?: number

@@ -25,6 +25,36 @@ export interface ShowContainer {
   mediaTagLinks: MediaTagLink[]
 }
 
+export interface MusicContainer {
+  musicArtistsArr: MusicArtist[]
+  musicAlbumsArr: MusicAlbum[]
+  musicTracksArr: MusicTrack[]
+  mediaArr: Media[]
+  mediaFilesArr: MediaFiles[]
+  tagsArr: Tags[]
+  mediaTagLinks: MediaTagLink[]
+}
+
+export interface MusicArtist {
+  id?: number
+  name: string
+}
+
+export interface MusicAlbum {
+  id?: number
+  artistId: number
+  title: string
+  year: number
+}
+
+export interface MusicTrack {
+  ratingKey: string
+  artistId: number
+  albumId: number
+  trackNumber: number
+}
+
+
 export interface Show {
   ratingKey: string
   studio: string

@@ -263,3 +263,68 @@ export function getDeleteSyncLogByRatingKeyQuery() {
 export function getDeleteSyncLogByIdQuery() {
   return ` DELETE FROM sync_log WHERE id = @id`
 }
+
+/*********************************************
+ * Queries for 'music_artists' table
+ * *******************************************/
+export function getUpsertMusicArtistsQuery() {
+  return `INSERT INTO music_artists (
+        id,
+        name
+    ) VALUES (
+        @id, 
+        @name
+    )
+    ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name`
+}
+
+export function getDeleteMusicArtistsQuery() {
+  return ` DELETE FROM music_artists WHERE id = @id`
+}
+
+/*********************************************
+ * Queries for 'music_albums' table
+ * *******************************************/
+export function getUpsertMusicAlbumsQuery() {
+  return `INSERT INTO music_albums (
+        id,
+        artistId,
+        title,
+        year
+    ) VALUES (
+        @id, 
+        @artistId,
+        @title,
+        @year
+    )
+    ON CONFLICT(id) DO UPDATE SET
+        artistId = excluded.artistId,
+        title = excluded.title,
+        year = excluded.year`
+}
+
+export function getDeleteMusicAlbumsQuery() {
+  return ` DELETE FROM music_albums WHERE id = @id`
+}
+
+/*********************************************
+ * Queries for 'music_tracks' table
+ * *******************************************/
+export function getUpsertMusicTracksQuery() {
+  return `INSERT INTO music_tracks (
+        ratingKey,
+        artistId,
+        albumId,
+        trackNumber
+    ) VALUES (
+        @ratingKey, 
+        @artistId,
+        @albumId,
+        @trackNumber
+    )
+    ON CONFLICT(ratingKey) DO UPDATE SET
+        artistId = excluded.artistId,
+        albumId = excluded.albumId,
+        trackNumber = excluded.trackNumber`
+}
