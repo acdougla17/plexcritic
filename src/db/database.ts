@@ -433,16 +433,19 @@ export async function mapPlexMusic(plexMusic: PlexLibraryItemResponse) {
 
   const artistMap = new Map<string, number>()
   const albumMap = new Map<string, number>()
-  let albumIdCounter = 1
+  let nextFallbackId = 1
 
   // Loop through every artist in the music library
   for (const artist of artists) {
     const artistName = artist.title ?? 'Unknown Artist'
-    const artistKey = artistName.toLowerCase()
-    const artistId = parseInt(artist.ratingKey) // Use Plex's artist ID
+    let artistId = Number(artist.ratingKey)
+    if (Number.isNaN(artistId)) {
+      artistId = nextFallbackId++
+    }
 
-    if (!artistMap.has(artistKey)) {
-      artistMap.set(artistKey, artistId)
+    // Deduplicate by Plex ratingKey (unique identifier), not by name
+    if (!artistMap.has(artist.ratingKey)) {
+      artistMap.set(artist.ratingKey, artistId)
       musicArtistsArr.push({
         id: artistId,
         name: artistName,
@@ -451,19 +454,30 @@ export async function mapPlexMusic(plexMusic: PlexLibraryItemResponse) {
 
     // Fetch all albums for this artist
     try {
-      const albumsRes = await getChildrenForArtist(artist.ratingKey)
-      const albums = albumsRes.MediaContainer.Metadata
+      const albumsRes = await getChildrenForArtist(
+        librarySectionKey.toString(),
+        artist.ratingKey,
+      )
+      const albums = Array.isArray(albumsRes.MediaContainer.Metadata)
+        ? albumsRes.MediaContainer.Metadata
+        : albumsRes.MediaContainer.Metadata
+        ? [albumsRes.MediaContainer.Metadata]
+        : []
 
       for (const album of albums) {
         const albumTitle = album.title ?? 'Unknown Album'
-        const albumKey = `${artistKey}:${albumTitle.toLowerCase()}`
 
-        let albumId: number
-        if (albumMap.has(albumKey)) {
-          albumId = albumMap.get(albumKey)!
-        } else {
-          albumId = albumIdCounter++
-          albumMap.set(albumKey, albumId)
+        let albumId = Number(album.ratingKey)
+        if (Number.isNaN(albumId)) {
+          if (albumMap.has(album.ratingKey)) {
+            albumId = albumMap.get(album.ratingKey)!
+          } else {
+            albumId = nextFallbackId++
+            albumMap.set(album.ratingKey, albumId)
+          }
+        }
+
+        if (!musicAlbumsArr.some((al) => al.id === albumId)) {
           musicAlbumsArr.push({
             id: albumId,
             artistId: artistId,
@@ -475,7 +489,11 @@ export async function mapPlexMusic(plexMusic: PlexLibraryItemResponse) {
         // Fetch all tracks for this album
         try {
           const tracksRes = await getChildrenForAlbum(album.ratingKey)
-          const tracks = tracksRes.MediaContainer.Metadata
+          const tracks = Array.isArray(tracksRes.MediaContainer.Metadata)
+            ? tracksRes.MediaContainer.Metadata
+            : tracksRes.MediaContainer.Metadata
+            ? [tracksRes.MediaContainer.Metadata]
+            : []
 
           for (const track of tracks) {
             // Build media record for track
@@ -563,6 +581,7 @@ export async function mapPlexMusic(plexMusic: PlexLibraryItemResponse) {
     } catch (err: unknown) {
       console.error(`Error fetching albums for artist ${artist.ratingKey}:`, err)
     }
+    console.log(`Processed artist: ${artistName} (ID: ${artistId})`)
   }
 
   return {
@@ -827,7 +846,10 @@ export function upsertMusic(container: MusicContainer) {
   }
 
   const trx = db.transaction(() => {
+    console.log('upsertMusic: starting music upsert', count)
+
     // 1. Media
+    console.log(`upsertMusic: upserting ${mediaArr.length} media rows`)
     try {
       for (const m of mediaArr) {
         upsertMedia.run(m)
@@ -837,6 +859,7 @@ export function upsertMusic(container: MusicContainer) {
     }
 
     // 2. Music Artists
+    console.log(`upsertMusic: upserting ${musicArtistsArr.length} music artist rows`)
     try {
       for (const a of musicArtistsArr) {
         upsertMusicArtists.run(a)
@@ -846,6 +869,7 @@ export function upsertMusic(container: MusicContainer) {
     }
 
     // 3. Music Albums
+    console.log(`upsertMusic: upserting ${musicAlbumsArr.length} music album rows`)
     try {
       for (const al of musicAlbumsArr) {
         upsertMusicAlbums.run(al)
@@ -855,6 +879,7 @@ export function upsertMusic(container: MusicContainer) {
     }
 
     // 4. Music Tracks
+    console.log(`upsertMusic: upserting ${musicTracksArr.length} music track rows`)
     try {
       for (const t of musicTracksArr) {
         upsertMusicTracks.run(t)
@@ -865,6 +890,7 @@ export function upsertMusic(container: MusicContainer) {
     }
 
     // 5. Media Files
+    console.log(`upsertMusic: upserting ${mediaFilesArr.length} media file rows`)
     try {
       for (const mf of mediaFilesArr) {
         upsertMediaFiles.run(mf)
@@ -874,6 +900,7 @@ export function upsertMusic(container: MusicContainer) {
     }
 
     // 6. Tags
+    console.log(`upsertMusic: upserting ${tagsArr.length} tag rows`)
     try {
       for (const t of tagsArr) {
         upsertTags.run(t)
@@ -883,6 +910,7 @@ export function upsertMusic(container: MusicContainer) {
     }
 
     // 7. Build + insert media_tags
+    console.log(`upsertMusic: upserting ${mediaTagLinks.length} media_tag links`)
     try {
       for (const link of mediaTagLinks) {
         const row = getTagId.get({

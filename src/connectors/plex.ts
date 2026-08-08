@@ -126,15 +126,18 @@ export async function getAllEpisodesForShow(
 }
 
 export async function getChildrenForArtist(
-  ratingKey: string,
+  librarySectionId: string,
+  artistRatingKey: string,
 ): Promise<PlexLibraryItemResponse> {
-  const endpoint = `/library/metadata/${ratingKey}/children`
+  const endpoint = `/library/sections/${librarySectionId}/all?artist.id=${encodeURIComponent(
+    artistRatingKey,
+  )}&type=9`
   try {
     const response: PlexLibraryItemResponse = await makePlexRequest(endpoint)
     return response
   } catch (err: unknown) {
     console.error(
-      `Error fetching albums for artist with ratingKey ${ratingKey}:`,
+      `Error fetching albums for artist ${artistRatingKey} in section ${librarySectionId}:`,
       err,
     )
     throw err
@@ -142,15 +145,15 @@ export async function getChildrenForArtist(
 }
 
 export async function getChildrenForAlbum(
-  ratingKey: string,
+  albumRatingKey: string,
 ): Promise<PlexLibraryItemResponse> {
-  const endpoint = `/library/metadata/${ratingKey}/children`
+  const endpoint = `/library/metadata/${albumRatingKey}/children`
   try {
     const response: PlexLibraryItemResponse = await makePlexRequest(endpoint)
     return response
   } catch (err: unknown) {
     console.error(
-      `Error fetching tracks for album with ratingKey ${ratingKey}:`,
+      `Error fetching tracks for album with ratingKey ${albumRatingKey}:`,
       err,
     )
     throw err
