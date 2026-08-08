@@ -234,3 +234,209 @@ export function makeEpisodeLibraryResponse(
     },
   }
 }
+
+/**
+ * Builds a minimal fake Plex "artist" item (as returned from /library/sections/{id}/all).
+ */
+export function makeArtistItem(
+  overrides: Partial<PlexLibraryItem> = {},
+): PlexLibraryItem {
+  return {
+    addedAt: 1700000000,
+    art: '/art.jpg',
+    chapterSource: '',
+    contentRating: '',
+    duration: 0,
+    key: '/library/metadata/100',
+    originallyAvailableAt: '',
+    lastViewedAt: 0,
+    primaryExtraKey: '',
+    rating: 0,
+    ratingKey: '100',
+    studio: '',
+    summary: 'A test artist.',
+    tagline: '',
+    thumb: '/thumb.jpg',
+    title: 'Test Artist',
+    type: 'artist',
+    updatedAt: 1700000000,
+    year: 0,
+    contentRatingAge: 0,
+    audienceRating: 0,
+    Media: [] as unknown as PlexLibraryItem['Media'],
+    Genre: [{ tag: 'Rock' }],
+    ...overrides,
+  } as PlexLibraryItem
+}
+
+/**
+ * Builds a minimal fake Plex "album" item.
+ */
+export function makeAlbumItem(
+  overrides: Partial<PlexLibraryItem> = {},
+): PlexLibraryItem {
+  return {
+    addedAt: 1700000000,
+    art: '/art.jpg',
+    chapterSource: '',
+    contentRating: '',
+    duration: 0,
+    key: '/library/metadata/101',
+    parentRatingKey: '100', // the artist's ratingKey
+    originallyAvailableAt: '2020-01-01',
+    lastViewedAt: 0,
+    primaryExtraKey: '',
+    rating: 0,
+    ratingKey: '101',
+    studio: '',
+    summary: 'A test album.',
+    tagline: '',
+    thumb: '/thumb.jpg',
+    title: 'Test Album',
+    type: 'album',
+    updatedAt: 1700000000,
+    year: 2020,
+    contentRatingAge: 0,
+    audienceRating: 0,
+    Media: [] as unknown as PlexLibraryItem['Media'],
+    ...overrides,
+  } as PlexLibraryItem
+}
+
+/**
+ * Builds a minimal fake Plex "track" item.
+ */
+export function makeTrackItem(
+  overrides: Partial<PlexLibraryItem> = {},
+): PlexLibraryItem {
+  return {
+    addedAt: 1700000000,
+    art: '/art.jpg',
+    chapterSource: '',
+    contentRating: '',
+    duration: 240000,
+    key: '/library/metadata/102',
+    parentRatingKey: '101', // the album's ratingKey
+    grandparentRatingKey: '100', // the artist's ratingKey
+    originallyAvailableAt: '',
+    index: 1, // track number
+    lastViewedAt: 0,
+    primaryExtraKey: '',
+    rating: 0,
+    ratingKey: '102',
+    studio: '',
+    summary: '',
+    tagline: '',
+    thumb: '/thumb.jpg',
+    title: 'Test Song',
+    type: 'track',
+    updatedAt: 1700000000,
+    year: 2020,
+    contentRatingAge: 0,
+    audienceRating: 0,
+    Media: [
+      {
+        id: 501,
+        duration: 240000,
+        bitrate: 320,
+        width: 0,
+        height: 0,
+        aspectRatio: 0,
+        audioChannels: 2,
+        audioCodec: 'mp3',
+        videoCodec: '',
+        videoResolution: '',
+        container: 'mp3',
+        videoFrameRate: '',
+        audioProfile: '',
+        videoProfile: '',
+        hasVoiceActivity: false,
+        Part: [
+          {
+            id: 601,
+            key: '/library/parts/601',
+            duration: 240000,
+            file: '/music/Test Artist/Test Album/01 - Test Song.mp3',
+            size: 10000000,
+            audioProfile: '',
+            container: 'mp3',
+            videoProfile: '',
+          },
+        ],
+      },
+    ],
+    ...overrides,
+  } as PlexLibraryItem
+}
+
+export function makeArtistLibraryResponse(
+  items: PlexLibraryItem[] = [makeArtistItem()],
+): PlexLibraryItemResponse {
+  return {
+    MediaContainer: {
+      allowSync: true,
+      art: '/art.jpg',
+      identifier: 'com.plexapp.plugins.library',
+      librarySectionID: 3,
+      librarySectionTitle: 'Music',
+      librarySectionUUID: 'uuid-3',
+      mediaTagPrefix: '/system/bundle/media/flags/',
+      mediaTagVersion: 1,
+      size: items.length,
+      thumb: '/thumb.jpg',
+      title1: 'Music',
+      title2: 'All Artists',
+      viewGroup: 'artist',
+      viewMode: '65592',
+      Metadata: items as [PlexLibraryItem],
+    },
+  }
+}
+
+export function makeAlbumLibraryResponse(
+  items: PlexLibraryItem[] = [makeAlbumItem()],
+): PlexLibraryItemResponse {
+  return {
+    MediaContainer: {
+      allowSync: true,
+      art: '/art.jpg',
+      identifier: 'com.plexapp.plugins.library',
+      librarySectionID: 3,
+      librarySectionTitle: 'Music',
+      librarySectionUUID: 'uuid-3',
+      mediaTagPrefix: '/system/bundle/media/flags/',
+      mediaTagVersion: 1,
+      size: items.length,
+      thumb: '/thumb.jpg',
+      title1: 'Music',
+      title2: 'Test Artist',
+      viewGroup: 'album',
+      viewMode: '65592',
+      Metadata: items as [PlexLibraryItem],
+    },
+  }
+}
+
+export function makeTrackLibraryResponse(
+  items: PlexLibraryItem[] = [makeTrackItem()],
+): PlexLibraryItemResponse {
+  return {
+    MediaContainer: {
+      allowSync: true,
+      art: '/art.jpg',
+      identifier: 'com.plexapp.plugins.library',
+      librarySectionID: 3,
+      librarySectionTitle: 'Music',
+      librarySectionUUID: 'uuid-3',
+      mediaTagPrefix: '/system/bundle/media/flags/',
+      mediaTagVersion: 1,
+      size: items.length,
+      thumb: '/thumb.jpg',
+      title1: 'Music',
+      title2: 'Test Album',
+      viewGroup: 'track',
+      viewMode: '65592',
+      Metadata: items as [PlexLibraryItem],
+    },
+  }
+}

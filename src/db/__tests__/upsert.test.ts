@@ -1,11 +1,20 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { makeMovieItem, makeMovieLibraryResponse } from '../../test/fixtures.js'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { makeMovieItem, makeMovieLibraryResponse, makeArtistItem, makeArtistLibraryResponse, makeAlbumItem, makeTrackItem } from '../../test/fixtures.js'
+
+// mapPlexMusic calls getChildrenForArtist() and getChildrenForAlbum(), so mock them
+vi.mock('../../connectors/plex.js', () => ({
+  getAllEpisodesForShow: vi.fn(),
+  getChildrenForArtist: vi.fn(),
+  getChildrenForAlbum: vi.fn(),
+}))
 
 // NOTE: src/test/setup.ts sets DB_PATH=':memory:' before this file (or any
 // file that imports database.ts) runs, so `db` here is a fresh in-memory
 // SQLite database with the real schema applied -- never your actual
 // plexcriticv2.db on disk.
-import { db, mapPlexMovies, upsertMovie, clearDatabase } from '../database.js'
+import { db, mapPlexMovies, upsertMovie, mapPlexMusic, upsertMusic, clearDatabase } from '../database.js'
+import { makeAlbumLibraryResponse, makeTrackLibraryResponse } from '../../test/fixtures.js'
+import { getChildrenForArtist, getChildrenForAlbum } from '../../connectors/plex.js'
 
 beforeEach(() => {
   clearDatabase('ALL')
@@ -103,3 +112,211 @@ describe('clearDatabase', () => {
     expect(mediaCount).toBeGreaterThan(0)
   })
 })
+
+describe('upsertMusic', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('inserts a new artist, album, and track across all music tables', async () => {
+    const mockGetChildrenForArtist = getChildrenForArtist as any
+    const mockGetChildrenForAlbum = getChildrenForAlbum as any
+
+    mockGetChildrenForArtist.mockResolvedValue(
+      makeAlbumLibraryResponse([makeAlbumItem()]),
+    )
+    mockGetChildrenForAlbum.mockResolvedValue(
+      makeTrackLibraryResponse([makeTrackItem()]),
+    )
+
+    const mapped = await mapPlexMusic(makeArtistLibraryResponse([makeArtistItem()]))
+    const count = upsertMusic(mapped)
+
+    expect(count.music_artists).toBe(1)
+    expect(count.music_albums).toBe(1)
+    expect(count.music_tracks).toBe(1)
+    expect(count.media).toBe(1)
+    expect(count.media_files).toBe(1)
+
+    const artistRow = db
+      .prepare('SELECT * FROM music_artists WHERE id = ?')
+      .get(100) as any
+    expect(artistRow?.name).toBe('Test Artist')
+
+    const albumRow = db
+      .prepare('SELECT * FROM music_albums WHERE id = ?')
+      .get(101) as any
+    expect(albumRow?.title).toBe('Test Album')
+    expect(albumRow?.artistId).toBe(100)
+
+    const trackRow = db
+      .prepare('SELECT * FROM music_tracks WHERE ratingKey = ?')
+      .get('102') as any
+    expect(trackRow?.artistId).toBe(100)
+    expect(trackRow?.albumId).toBe(101)
+    expect(trackRow?.trackNumber).toBe(1)
+  })
+
+  it('maintains foreign key integrity between artists, albums, and tracks', async () => {
+    const mockGetChildrenForArtist = getChildrenForArtist as any
+    const mockGetChildrenForAlbum = getChildrenForAlbum as any
+
+    mockGetChildrenForArtist.mockResolvedValue(
+      makeAlbumLibraryResponse([makeAlbumItem()]),
+    )
+    mockGetChildrenForAlbum.mockResolvedValue(
+      makeTrackLibraryResponse([makeTrackItem()]),
+    )
+
+    const mapped = await mapPlexMusic(makeArtistLibraryResponse([makeArtistItem()]))
+    upsertMusic(mapped)
+
+    // Verify FK constraint is satisfied by querying the relationship
+    const albumWithArtist = db
+      .prepare(
+        `
+        SELECT a.id, a.title, ar.id as artistId, ar.name
+        FROM music_albums a
+        JOIN music_artists ar ON ar.id = a.artistId
+        WHERE a.id = ?
+      `,
+      )
+      .get(101) as any
+
+    expect(albumWithArtist?.artistId).toBe(100)
+    expect(albumWithArtist?.name).toBe('Test Artist')
+
+    // Verify track to album FK
+    const trackWithalbum = db
+      .prepare(
+        `
+        SELECT t.*, a.title as albumTitle
+        FROM music_tracks t
+        JOIN music_albums a ON a.id = t.albumId
+        WHERE t.ratingKey = ?
+      `,
+      )
+      .get('102') as any
+
+    expect(trackWithalbum?.albumTitle).toBe('Test Album')
+  })
+
+  it('handles multiple artists with the same name but different ratingKeys', async () => {
+    const mockGetChildrenForArtist = getChildrenForArtist as any
+    const mockGetChildrenForAlbum = getChildrenForAlbum as any
+
+    const artist1 = makeArtistItem({ ratingKey: '100', title: 'Same Name' })
+    const artist2 = makeArtistItem({ ratingKey: '110', title: 'Same Name' })
+
+    mockGetChildrenForArtist.mockResolvedValueOnce(
+      makeAlbumLibraryResponse([
+        makeAlbumItem({ ratingKey: '101', parentRatingKey: '100' }),
+      ]),
+    )
+    mockGetChildrenForArtist.mockResolvedValueOnce(
+      makeAlbumLibraryResponse([
+        makeAlbumItem({ ratingKey: '111', parentRatingKey: '110' }),
+      ]),
+    )
+    mockGetChildrenForAlbum.mockResolvedValueOnce(
+      makeTrackLibraryResponse([makeTrackItem()]),
+    )
+    mockGetChildrenForAlbum.mockResolvedValueOnce(
+      makeTrackLibraryResponse([
+        makeTrackItem({
+          ratingKey: '112',
+          parentRatingKey: '111',
+          grandparentRatingKey: '110',
+        }),
+      ]),
+    )
+
+    const mapped = await mapPlexMusic(makeArtistLibraryResponse([artist1, artist2]))
+    upsertMusic(mapped)
+
+    const artists = db
+      .prepare('SELECT id, name FROM music_artists ORDER BY id')
+      .all() as Array<{ id: number; name: string }>
+    expect(artists).toHaveLength(2)
+    expect(artists.map((a) => a.id)).toEqual([100, 110])
+
+    const albums = db
+      .prepare('SELECT id, artistId, title FROM music_albums ORDER BY id')
+      .all() as Array<{ id: number; artistId: number; title: string }>
+    expect(albums).toHaveLength(2)
+    expect(albums.some((a) => a.artistId === 100)).toBe(true)
+    expect(albums.some((a) => a.artistId === 110)).toBe(true)
+  })
+
+  it('updates existing music records on re-sync without duplicating', async () => {
+    const mockGetChildrenForArtist = getChildrenForArtist as any
+    const mockGetChildrenForAlbum = getChildrenForAlbum as any
+
+    mockGetChildrenForArtist.mockResolvedValue(
+      makeAlbumLibraryResponse([makeAlbumItem()]),
+    )
+    mockGetChildrenForAlbum.mockResolvedValue(
+      makeTrackLibraryResponse([makeTrackItem()]),
+    )
+
+    // First sync
+    const mapped1 = await mapPlexMusic(
+      makeArtistLibraryResponse([makeArtistItem()]),
+    )
+    upsertMusic(mapped1)
+
+    vi.clearAllMocks()
+    mockGetChildrenForArtist.mockResolvedValue(
+      makeAlbumLibraryResponse([
+        makeAlbumItem({ year: 2021 }), // Updated year
+      ]),
+    )
+    mockGetChildrenForAlbum.mockResolvedValue(
+      makeTrackLibraryResponse([makeTrackItem()]),
+    )
+
+    // Second sync with updates
+    const mapped2 = await mapPlexMusic(
+      makeArtistLibraryResponse([makeArtistItem()]),
+    )
+    upsertMusic(mapped2)
+
+    const albumRow = db
+      .prepare('SELECT * FROM music_albums WHERE id = ?')
+      .get(101) as any
+    expect(albumRow?.year).toBe(2021)
+
+    // Verify no duplicates created
+    const albumCount = (db.prepare('SELECT COUNT(*) as c FROM music_albums').get() as any).c
+    expect(albumCount).toBe(1)
+  })
+
+  it('creates proper media and media_files records for tracks', async () => {
+    const mockGetChildrenForArtist = getChildrenForArtist as any
+    const mockGetChildrenForAlbum = getChildrenForAlbum as any
+
+    mockGetChildrenForArtist.mockResolvedValue(
+      makeAlbumLibraryResponse([makeAlbumItem()]),
+    )
+    mockGetChildrenForAlbum.mockResolvedValue(
+      makeTrackLibraryResponse([makeTrackItem()]),
+    )
+
+    const mapped = await mapPlexMusic(makeArtistLibraryResponse([makeArtistItem()]))
+    upsertMusic(mapped)
+
+    const mediaRow = db
+      .prepare('SELECT * FROM media WHERE ratingKey = ?')
+      .get('102') as any
+    expect(mediaRow?.title).toBe('Test Song')
+    expect(mediaRow?.type).toBe('track')
+    expect(mediaRow?.libraryName).toBe('Music')
+
+    const fileRow = db
+      .prepare('SELECT * FROM media_files WHERE ratingKey = ?')
+      .get('102') as any
+    expect(fileRow?.audioCodec).toBe('mp3')
+    expect(fileRow?.file).toContain('Test Song')
+  })
+})
+
