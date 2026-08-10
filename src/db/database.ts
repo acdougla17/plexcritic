@@ -96,6 +96,8 @@ export function mapPlexMovies(plexMovies: PlexLibraryItemResponse) {
       libraryName: libraryName,
       librarySectionKey: librarySectionKey.toString(),
       lastRefreshed: Date.now(),
+      viewCount: movie.viewCount ?? 0,
+      lastViewedAt: movie.lastViewedAt ?? 0,
     })
 
     // For each media section in a movie, build a media files record for each file and push it to mediaArr
@@ -199,6 +201,8 @@ export async function mapPlexShows(plexShows: PlexLibraryItemResponse) {
         libraryName: libraryName,
         librarySectionKey: librarySectionKey.toString(),
         lastRefreshed: Date.now(),
+        viewCount: episode.viewCount ?? 0,
+        lastViewedAt: episode.lastViewedAt ?? 0
       })
 
       // For each media section in a movie, build a media files record for each file and push it to mediaArr
@@ -266,6 +270,8 @@ export async function mapPlexShows(plexShows: PlexLibraryItemResponse) {
       audienceRating: show.audienceRating ?? '',
       coverPosterUrl:
         show.Image?.find((img) => img.type === 'coverPoster')?.url ?? '',
+      leafCount: show.leafCount ?? 0,
+      viewedLeafCount: show.viewedLeafCount ?? 0,
     })
 
     // Also create a media record for the show so the shows foreign key can be satisfied
@@ -280,6 +286,8 @@ export async function mapPlexShows(plexShows: PlexLibraryItemResponse) {
       libraryName: libraryName,
       librarySectionKey: librarySectionKey.toString(),
       lastRefreshed: Date.now(),
+      viewCount: show.viewCount ?? 0,
+      lastViewedAt: show.lastViewedAt ?? 0
     })
 
     // Build out all of the tags associated to show
@@ -359,6 +367,8 @@ export function mapPlexEpisodes(plexEpisodes: PlexLibraryItemResponse) {
       libraryName: libraryName,
       librarySectionKey: librarySectionKey.toString(),
       lastRefreshed: Date.now(),
+      viewCount: episode.viewCount ?? 0,
+      lastViewedAt: episode.lastViewedAt ?? 0
     })
 
     //For each media section in a show, build a media files record for each file and push it to mediaArr
@@ -508,6 +518,8 @@ export async function mapPlexMusic(plexMusic: PlexLibraryItemResponse) {
               libraryName: libraryName,
               librarySectionKey: librarySectionKey.toString(),
               lastRefreshed: Date.now(),
+              viewCount: track.viewCount ?? 0,
+              lastViewedAt: track.lastViewedAt ?? 0
             })
 
             // Build music track record

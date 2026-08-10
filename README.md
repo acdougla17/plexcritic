@@ -1,127 +1,150 @@
-This project is to create a Plex critic that will analyze your collection like a pretentious movie buff friend looking through your shelves.
+# Plex Critic
 
-#How To Test
-- npm run dev
-- http://localhost:3000/
+A local tool that syncs your Plex library into its own SQLite database, then
+analyzes it two ways: a **stats dashboard** (what you own, what format it's
+in, what needs converting) and a **critic** (rule-based commentary on what
+you've actually watched/listened to vs. what's sitting on the shelf).
 
-# Plex Critic — Project Roadmap)
+> "I don't care what you own. I care what you actually watch."
 
-*Stack: TypeScript, Express 5, better-sqlite3, axios, dotenv. Frontend: none yet.*
+## Stack
 
-## 1. What's actually done vs. README
+TypeScript, Express 5, better-sqlite3, axios, dotenv. Tests: Vitest + Supertest.
+Frontend: a static HTML/JS dashboard served from `public/` — no framework yet.
 
-| Phase | README says | Reality |
-|---|---|---|
-| 1. Skeleton | DONE | Confirmed — Express app, route registry, home page listing endpoints |
-| 2. Plex connection | DONE | Confirmed — `connectors/plex.ts` handles libraries, items, episodes, item details, tuners |
-| 3. Fetch all items | In progress | **Movies: working end-to-end.** Shows/music: connector methods exist (`getAllEpisodesForShow`, etc.) and mapping logic (`mapPlexShows`) is written, but the actual upsert calls are commented out in `refreshAllItemsInSection` |
-| 4. DB layer | DONE | Confirmed, and better than the README implies — see schema below |
-| TODO: episode table | — | **Already done** — `episodes` table exists with `showRatingKey`, `seasonNumber`, `episodeNumber` |
-| TODO: song table | — | **Already done** — `music_tracks`, `music_albums`, `music_artists` all exist (upsert logic not yet written though) |
-| 5. Analytics module | Not started | Confirmed — no analytics queries anywhere in `databaseQueries.ts` |
-| 6. Critic | Not started | Partially scaffolded — `critic_reviews` table exists in schema, and a query stub exists, but it's broken (see bugs below) and nothing calls it |
-| 7. React frontend | Not started | Confirmed — no client code, `dist/` is just compiled server output |
-| 8. Dockerize | Not started | Confirmed |
-
----
-
-## 3. Schema you already have (for reference)
+## Running it
 
 ```
-media            — shared item table (movies + shows + episodes), keyed by ratingKey
+npm install
+npm run dev      # http://localhost:3000/ — dashboard
+npm test         # unit + integration tests (in-memory DB, never touches plexcriticv2.db)
+npm run build    # tsc -> dist/
+```
+
+You'll need a `.env` with `PLEX_URL`, `PLEX_PORT`, and `PLEX_TOKEN` for anything
+that talks to a real Plex server. Tests don't need this — `src/test/setup.ts`
+stubs it out.
+
+## Current status
+
+Movies, shows/episodes, and music all sync end-to-end now — `refreshLibrary`
+dispatches to `mapPlexMovies`/`mapPlexShows`/`mapPlexMusic` and their matching
+upserters based on the section's `viewGroup`. The four bugs flagged in the
+previous version of this doc (episode media rows keyed to the wrong
+ratingKey, season/episode fields swapped, `media_files` duplicating rows on
+re-sync, malformed `critic_reviews` upsert) are all fixed and covered by
+regression tests.
+
+The dashboard (`public/dashboard.html` + `dashboard.js`) currently has three
+cards: DB table row counts, library refresh controls, and a raw
+Plex-endpoint tester. It's served as static files via Express
+(`app.use(express.static('public'))`) — see "Next: frontend" below for where
+this is headed.
+
+| Area | Status |
+|---|---|
+| Plex connection (movies/shows/episodes/music) | Done |
+| DB schema + sync (movies/shows/episodes/music) | Done |
+| Unit/integration tests | Done — 51 tests, Vitest, in-memory DB |
+| Basic dashboard (stats, refresh, endpoint tester) | Done |
+| Watch/listen stats in schema | **Not started — see below** |
+| Analytics module | Not started |
+| Media format / transcode-candidate module | Not started |
+| Critic engine | Not started (table scaffolded, nothing generates reviews yet) |
+| Dashboard sections (Library Mgmt/Viewer/Testing/Health/Analytics/Critics Office) | Not started |
+| Docker | Not started |
+
+## Schema
+
+```
+media            — shared item table (movies + shows + episodes + music tracks), keyed by ratingKey
 movies           — movie-specific fields (studio, tagline, content rating, audience rating)
-shows            — show-specific fields (same shape as movies)
+shows            — show-specific fields
 episodes         — showRatingKey, seasonNumber, episodeNumber
 media_files      — per-file technical specs (codec, resolution, frame rate, container, path)
 tags             — deduplicated tag table (genre, director, actor, writer, etc. — tagType + name)
 media_tags       — join table, ratingKey <-> tagId
-music_artists / music_albums / music_tracks — present, upsert logic not yet written
+music_artists / music_albums / music_tracks — synced now
 sync_log         — per-ratingKey log of what got synced when
-critic_reviews   — scaffolded, not yet wired up
+critic_reviews   — scaffolded, not yet wired up to anything
 ```
 
-The `tags` table already generalizes actor/director/writer/genre into one structure (`tagType` discriminates) — that's actually a cleaner design than what I proposed in the last draft of this roadmap, since it means "most frequent director" and "most frequent genre" are the same query shape with a different `tagType` filter. No redesign needed here — build analytics against what's already there.
+## Watch/listen stats — where the data actually lives
 
-One thing worth deciding: **`media` has no `viewCount`/`lastViewedAt` fields at all.** Your README's analytics list (never-watched %, avg days to first watch) needs Plex's watch-history data, which isn't in the schema yet. That's not a bug, just a gap — see phase 5 below.
+This was the open question. It doesn't require a new API call — Plex already
+includes it in responses you're fetching:
 
----
+- **Movies & episodes**: `viewCount` (play count) and `lastViewedAt` (unix
+  seconds) on the item itself. **If never watched, Plex omits the fields
+  entirely rather than sending 0** — worth handling explicitly (`?? 0`) when
+  mapping, since a missing field and a `0` need to mean the same thing to
+  your analytics queries.
+- **Shows**: `leafCount` (total episodes) / `viewedLeafCount` (watched
+  episodes) on the show item — gives "show completion %" without summing
+  every episode yourself.
+- **Music tracks**: same `viewCount`/`lastViewedAt` shape, meaning play
+  count / last played.
 
-## 4. Phase 3 — finish this first
+To use this: add nullable `viewCount` and `lastViewedAt` columns to `media`,
+then set them in `mapPlexMovies`, `mapPlexShows` (episode loop), and
+`mapPlexMusic` from the corresponding Plex fields. No connector changes
+needed — the data's already in every response those mappers receive.
 
-Before analytics, turn the lights on for shows and music:
+## Roadmap
 
-1. Fix bugs 1 and 2 above.
-2. Uncomment `upsertShow(mapPlexShows(allItems))` in `refreshAllItemsInSection`.
-3. Write the music mapper/upsert (mirroring `mapPlexMovies`/`upsertMovie`) — currently `mapPlexShows` exists but there's no `mapPlexMusic` yet, and the `artist` branch just logs "not ready."
-4. Add `viewCount` and `lastViewedAt` to the `media` table (or fetch them separately) — Plex's `/library/sections/{key}/all` response includes `viewCount` and `lastViewedAt` per item already, so this may just mean adding two columns and two fields to the mapper, not a new API call.
+### 1. Watch/listen stats (do this first)
+Add the two columns + mapper changes above. Everything below depends on this
+existing, so it's the one blocking item.
 
-## 5. Phase 5 — Analytics module (once phase 3 is solid)
+### 2. Analytics module
+New `src/db/analyticsQueries.ts` + `src/routes/analytics.ts`, following the
+existing one-file-per-concern pattern. Queries against `media`/`movies`/
+`tags`/`media_tags` for: total counts, never-watched %, avg days to first
+watch, added-vs-watched by year, collection appearance counts, most frequent
+actor/director/writer (all via `tags` filtered by `tagType`).
 
-With `viewCount`/`lastViewedAt` added, your README's queries map directly onto the existing schema:
+### 3. Media format module (your transcode goal)
+No schema changes needed — `media_files` already has `videoCodec`,
+`container`, `videoResolution`. New `src/routes/formats.ts`: breakdown by
+codec/container, and a "transcode candidates" query against a small config
+file defining what counts as an acceptable format for you.
 
-**Total films**
-```sql
-SELECT COUNT(*) FROM media m JOIN movies mv ON mv.ratingKey = m.ratingKey;
-```
+### 4. Critic engine
+Rule-based: a condition → template-string mapping fed by the analytics
+output. `critic_reviews` table is ready to store generated reviews over time
+(append-only looks like the intended design, given the autoincrement `id`
+with no unique constraint — worth confirming that's still what you want).
 
-**Never-watched %**
-```sql
-SELECT
-  ROUND(100.0 * SUM(CASE WHEN viewCount = 0 THEN 1 ELSE 0 END) / COUNT(*), 1) AS pct
-FROM media m JOIN movies mv ON mv.ratingKey = m.ratingKey;
-```
+### 5. Frontend — breaking the dashboard into sections
+You want six sections:
 
-**Most frequent director** (using the existing `tags` design)
-```sql
-SELECT t.name, COUNT(*) AS appearances
-FROM media_tags mt
-JOIN tags t ON t.id = mt.tagId
-WHERE t.tagType = 'director'
-GROUP BY t.id
-ORDER BY appearances DESC
-LIMIT 10;
-```
+- **Library Management** — refresh controls (what's already in the "Library
+  Refresh" card), plus `db/remove`/`removeAll` cleanup controls.
+- **Library Viewer** — browse what's actually in the DB: movies/shows/music
+  tables, searchable/filterable, not just row counts.
+- **Testing Section** — the existing raw-endpoint tester, unchanged.
+- **Health Dashboard** — `/health` uptime, plus sync_log activity (last
+  refresh per section, error counts) — a proper operational view rather than
+  just "is the server up."
+- **Analytics Dashboard** — format breakdown, transcode candidates, general
+  library stats. Explicitly *not* watch-behavior or critic content, per your
+  scope — this is the "what do I own and what state is it in" view, with
+  adjustable settings (e.g. which codecs/containers count as "needs
+  conversion").
+- **Critics Office** — generated reviews/feedback once phase 4 exists.
 
-Suggested new file: `src/db/analyticsQueries.ts`, following the same pattern as `databaseQueries.ts`, plus a `src/routes/analytics.ts` exposing them — consistent with how the rest of the codebase is organized (one queries file, one route file per concern).
+Given the current dashboard is static HTML/JS with card-based sections
+already, the natural next step is either (a) tabs/nav within the single
+page swapping which card-group is visible, or (b) separate HTML pages per
+section sharing `dashboard.js`'s fetch helpers. Worth deciding before
+scaffolding — a tabbed single-page approach keeps shared state (like loaded
+library list) in one place; separate pages are simpler individually but
+duplicate some fetch logic.
 
-## 6. Phase 5.5 — Media format module (your transcode goal — not in original README)
+## Testing
 
-This is the piece that supports your "what should I convert" goal and it's *already fully supported by the schema* — `media_files` has `videoCodec`, `container`, `videoResolution` right now:
-
-```sql
-SELECT videoCodec, container, COUNT(*) AS count
-FROM media_files
-GROUP BY videoCodec, container
-ORDER BY count DESC;
-```
-```sql
-SELECT m.title, mf.container, mf.videoCodec, mf.videoResolution, mf.file
-FROM media_files mf
-JOIN media m ON m.ratingKey = mf.ratingKey
-WHERE mf.videoCodec IN ('mpeg4', 'wmv3')  -- your "needs conversion" list
-   OR mf.container = 'avi';
-```
-No schema changes needed here at all — this can be built in parallel with phase 5 since it doesn't depend on the viewCount addition.
-
-## 7. Phase 6 — Critic engine
-
-The `critic_reviews` table already anticipates storing generated reviews (with `criticName`, `score`, `category`) rather than generating them fresh every request — that's a reasonable design if you want review history over time. Given your rule-based approach:
-
-- Fix the broken upsert query (bug 4) first.
-- Build `src/critic/rules.ts` (condition → template array) similar to what I sketched before — this part of the plan doesn't change based on the repo review, since no critic code exists yet to react to.
-- Decide: does `critic_reviews` get a new row every time you refresh (so you can see how your "taste profile" changes over months), or does it overwrite? The schema as written (autoincrement `id`, no unique constraint) suggests append-only was the original intent — worth confirming that's what you want before fixing the upsert.
-
-## 8. Phases 7–8
-
-Unchanged from before — React frontend and Dockerize are both genuinely un-started, and don't have any surprises to correct for. Once 5/5.5/6 expose clean JSON endpoints, frontend work is straightforward; Docker is low-risk once the app is feature-stable.
-
----
-
-## 9. Suggested immediate order of operations
-
-1. Fix bugs 1–3 (episode ratingKey, season/episode swap, media_files dedup).
-2. Add `viewCount`/`lastViewedAt` to `media`, re-enable show sync, write music mapper.
-3. Build phase 5.5 (media format module) — no blockers, quick win, directly serves your transcode goal.
-4. Build phase 5 (analytics) now that watch data exists.
-5. Fix bug 4, then build phase 6 (critic).
-6. Frontend, then Docker.
+`npm test` runs everything against an in-memory SQLite DB (via `DB_PATH`
+env var, see `src/config.ts`) — it never touches your real `plexcriticv2.db`.
+See `src/db/__tests__/`, `src/connectors/__tests__/`, `src/routes/__tests__/`.
+New features should get a test file alongside their module, following that
+pattern.

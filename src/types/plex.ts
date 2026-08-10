@@ -149,6 +149,8 @@ export interface PlexLibraryItemResponse {
     viewGroup: string
     viewMode: string
     Metadata: [PlexLibraryItem]
+    viewCount?: number
+    lastViewedAt?: number
   }
 }
 
@@ -167,6 +169,7 @@ export interface PlexLibraryItem {
   index?: number
   parentIndex?: number
   lastViewedAt: number
+  viewCount?: number
   leafCount?: number
   viewedLeafCount?: number
   childCount?: number

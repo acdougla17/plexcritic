@@ -12,7 +12,9 @@ export function getUpsertMediaQuery() {
         duration, 
         libraryName,
         librarySectionKey, 
-        lastRefreshed
+        lastRefreshed,
+        viewCount,
+        lastViewedAt
     ) VALUES (
         @ratingKey, 
         @type, 
@@ -23,7 +25,9 @@ export function getUpsertMediaQuery() {
         @duration, 
         @libraryName,
         @librarySectionKey, 
-        @lastRefreshed
+        @lastRefreshed,
+        @viewCount,
+        @lastViewedAt
     )
     ON CONFLICT(ratingKey) DO UPDATE SET
         title = excluded.title,
@@ -130,14 +134,18 @@ export function getUpsertShowsQuery() {
         contentRating,
         contentRatingAge,
         audienceRating,
-        coverPosterUrl
+        coverPosterUrl,
+        leafCount,
+        viewedLeafCount
     ) VALUES (
         @ratingKey, 
         @studio,
         @contentRating,
         @contentRatingAge,
         @audienceRating,
-        @coverPosterUrl
+        @coverPosterUrl,
+        @leafCount,
+        @viewedLeafCount
     )
     ON CONFLICT(ratingKey) DO UPDATE SET
         studio = excluded.studio,

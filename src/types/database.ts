@@ -62,6 +62,8 @@ export interface Show {
   contentRatingAge: number
   audienceRating: number
   coverPosterUrl: string
+  leafCount: number
+  viewedLeafCount: number
 }
 
 export interface Episode {
@@ -82,6 +84,8 @@ export interface Media {
   libraryName: string
   librarySectionKey: string
   lastRefreshed: number
+  viewCount: number
+  lastViewedAt: number
 }
 
 export interface MediaFiles {
