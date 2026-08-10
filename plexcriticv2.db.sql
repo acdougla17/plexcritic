@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS "media" (
 	"libraryName"	TEXT,
 	"librarySectionKey"	TEXT,
 	"lastRefreshed"	INTEGER,
+	"viewCount" INTEGER,
+	"lastViewedAt" INTEGER,
 	PRIMARY KEY("ratingKey")
 );
 CREATE TABLE IF NOT EXISTS "media_files" (
@@ -88,6 +90,8 @@ CREATE TABLE IF NOT EXISTS "shows" (
 	"contentRatingAge"	TEXT,
 	"audienceRating"	REAL,
 	"coverPosterUrl"	TEXT,
+	"leafCount"	INTEGER,
+	"viewedLeafCount"	INTEGER,
 	PRIMARY KEY("ratingKey"),
 	FOREIGN KEY("ratingKey") REFERENCES "media"("ratingKey")
 );
