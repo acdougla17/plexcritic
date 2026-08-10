@@ -5,146 +5,65 @@ import getAllEpisodesForShowRouter from './routes/getFromPlex.js'
 import refreshLibraryRouter from './routes/refreshLibrary.js'
 import testRouter from './routes/test.js'
 import dbRouter from './routes/db.js'
+import formatsRouter from './routes/formats.js'
 import tuners from './routes/tuners.js'
 import path from 'node:path'
+import fs from 'node:fs'
 
 const app = express()
 const port = config.port
-app.use(express.static(path.join(process.cwd(), 'public')))
+const publicDir: string = path.join(process.cwd(), 'public')
+const clientIndex: string = path.join(publicDir, 'index.html')
 
-// Add routes here to display on home page
-const routesArray = [
-  {
-    path: '/health',
-    hasParams: false,
-    name: 'Health Check',
-    description: 'Check server health and uptime',
-  },
-  {
-    path: '/test',
-    hasParams: false,
-    name: 'Test',
-    description: 'Runs whatever current test code I am working on',
-  },
-  {
-    path: '/getFromPlex/getAllLibraries',
-    hasParams: false,
-    name: 'Get Library Sections',
-    description:
-      'Fetch Plex library sections categorized into movies, shows, music, and other',
-  },
-  {
-    path: '/getFromPlex/allLibraryItems/2',
-    hasParams: true,
-    name: 'Get All Items in Section',
-    description:
-      'Fetch all items in a specific Plex library section by providing the sectionKey as a URL parameter',
-  },
-  {
-    path: '/getFromPlex/allEpisodes/56412',
-    hasParams: true,
-    name: 'Get All Episodes for Show',
-    description:
-      "Fetch all episodes for a specific show by providing the show's ratingKey as a URL parameter",
-  },
-  {
-    path: '/getFromPlex/itemDetails/56412',
-    hasParams: true,
-    name: 'Get Item Details',
-    description:
-      'Fetch detailed information for a specific Plex library item by providing the ratingKey as a URL parameter',
-  },
-  {
-    path: '/refreshLibrary/:sectionKey',
-    hasParams: true,
-    name: 'Refresh Library Section',
-    description:
-      'Refresh a specific Plex library section by providing the sectionKey as a URL parameter. You can also provide multiple section keys separated by commas, or use "ALL" to refresh all sections.',
-  },
-  {
-    path: '/db/removeAll',
-    hasParams: true,
-    name: 'Clear out entire local database',
-    description:
-      'Deletes all rows from local SQLite database tables',
-  },
-  {
-    path: '/db/remove/:tableName',
-    hasParams: true,
-    name: 'Clear out local database table',
-    description:
-      'Deletes all rows from local SQLite database table',
-  },
-  {
-    path: '/tuners',
-    hasParams: false,
-    name: 'Get Tuners',
-    description:
-      'Fetches information about available tuner devices',
-  },
-  {
-    path: '/dashboard',
-    hasParams: false,
-    name: 'Dashboard',
-    description:
-      'Open the live database dashboard with stats and library refresh controls',
-  },
-  {
-    path: '/tuners/remove/:tunerId',
-    hasParams: false,
-    name: 'Remove Tuner',
-    description:
-      'Removes a tuner device from the system',
-  },
-]
+app.use(express.static(publicDir))
 
-// Function to generate the HTML for the home page, listing available routes and their descriptions
-function generateHomePage() {
-  const page =
-    `<!DOCTYPE html>` +
-    `<html lang="en">` +
-    `<head>` +
-    `<meta charset="UTF-8">` +
-    `<meta name="viewport" content="width=device-width, initial-scale=1.0">` +
-    `<title>Plex Critic API</title>` +
-    `</head>` +
-    `<body>` +
-    `<h1>Welcome to the Plex Critic API</h1>` +
-    `<p>Available endpoints:</p>` +
-    `<ul>` +
-    routesArray
-      .map((route) => {
-        if (route.hasParams) {
-          return `<li>
-                <a href="${route.path}">${route.path}</a> - ${route.description} (Requires URL parameters)
-              </li>`
-        } else {
-          return `<li><a href="${route.path}">${route.path}</a> - ${route.description}</li>`
-        }
-      })
-      .join('') +
-    `</ul>` +
-    `</body>` +
-    `</html>`
-  return page
-}
-
-app.get('/', (req, res) => {
-  res.send(generateHomePage())
-})
-
-app.get('/dashboard', (_req, res) => {
-  res.sendFile(path.join(process.cwd(), 'public', 'dashboard.html'))
-})
-
-app.listen(port, () => {
-  console.log(`Server running: http://localhost:${port}/`)
-})
-
-// Routes
+// Routes (registered before SPA fallback)
 app.use('/health', healthRouter)
 app.use('/getFromPlex', getAllEpisodesForShowRouter)
 app.use('/refreshLibrary', refreshLibraryRouter)
 app.use('/test', testRouter)
 app.use('/db', dbRouter)
+app.use('/formats', formatsRouter)
 app.use('/tuners', tuners)
+
+app.get('/api', (_req, res) => {
+  res.json({
+    name: 'Plex Critic API',
+    endpoints: [
+      '/health',
+      '/health/sync',
+      '/db/stats',
+      '/db/media',
+      '/db/remove/:tableName',
+      '/db/removeAll',
+      '/formats/summary',
+      '/formats/candidates',
+      '/formats/preferences',
+      '/getFromPlex/getAllLibraries',
+      '/refreshLibrary/:sectionKey',
+      '/tuners',
+    ],
+  })
+})
+
+// SPA: serve built React app when present; otherwise point at Vite dev server
+app.get('/{*splat}', (_req, res) => {
+  if (fs.existsSync(clientIndex)) {
+    res.sendFile(clientIndex)
+    return
+  }
+  res
+    .status(200)
+    .type('html')
+    .send(
+      `<!DOCTYPE html><html><body style="font-family:sans-serif;padding:2rem">
+        <h1>Plex Critic</h1>
+        <p>UI not built yet. Run <code>npm run dev</code> and open the Vite URL, or <code>npm run build</code> then restart.</p>
+        <p><a href="/api">API index</a></p>
+      </body></html>`,
+    )
+})
+
+app.listen(port, () => {
+  console.log(`Server running: http://localhost:${port}/`)
+})
