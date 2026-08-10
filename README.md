@@ -47,7 +47,7 @@ this is headed.
 | DB schema + sync (movies/shows/episodes/music) | Done |
 | Unit/integration tests | Done — 51 tests, Vitest, in-memory DB |
 | Basic dashboard (stats, refresh, endpoint tester) | Done |
-| Watch/listen stats in schema | **Not started — see below** |
+| Watch/listen stats in schema | Done |
 | Analytics module | Not started |
 | Media format / transcode-candidate module | Not started |
 | Critic engine | Not started (table scaffolded, nothing generates reviews yet) |
@@ -69,53 +69,28 @@ sync_log         — per-ratingKey log of what got synced when
 critic_reviews   — scaffolded, not yet wired up to anything
 ```
 
-## Watch/listen stats — where the data actually lives
-
-This was the open question. It doesn't require a new API call — Plex already
-includes it in responses you're fetching:
-
-- **Movies & episodes**: `viewCount` (play count) and `lastViewedAt` (unix
-  seconds) on the item itself. **If never watched, Plex omits the fields
-  entirely rather than sending 0** — worth handling explicitly (`?? 0`) when
-  mapping, since a missing field and a `0` need to mean the same thing to
-  your analytics queries.
-- **Shows**: `leafCount` (total episodes) / `viewedLeafCount` (watched
-  episodes) on the show item — gives "show completion %" without summing
-  every episode yourself.
-- **Music tracks**: same `viewCount`/`lastViewedAt` shape, meaning play
-  count / last played.
-
-To use this: add nullable `viewCount` and `lastViewedAt` columns to `media`,
-then set them in `mapPlexMovies`, `mapPlexShows` (episode loop), and
-`mapPlexMusic` from the corresponding Plex fields. No connector changes
-needed — the data's already in every response those mappers receive.
-
 ## Roadmap
 
-### 1. Watch/listen stats (do this first)
-Add the two columns + mapper changes above. Everything below depends on this
-existing, so it's the one blocking item.
-
-### 2. Analytics module
+### 1. Analytics module
 New `src/db/analyticsQueries.ts` + `src/routes/analytics.ts`, following the
 existing one-file-per-concern pattern. Queries against `media`/`movies`/
 `tags`/`media_tags` for: total counts, never-watched %, avg days to first
 watch, added-vs-watched by year, collection appearance counts, most frequent
 actor/director/writer (all via `tags` filtered by `tagType`).
 
-### 3. Media format module (your transcode goal)
+### 2. Media format module (your transcode goal)
 No schema changes needed — `media_files` already has `videoCodec`,
 `container`, `videoResolution`. New `src/routes/formats.ts`: breakdown by
 codec/container, and a "transcode candidates" query against a small config
 file defining what counts as an acceptable format for you.
 
-### 4. Critic engine
+### 3. Critic engine
 Rule-based: a condition → template-string mapping fed by the analytics
 output. `critic_reviews` table is ready to store generated reviews over time
 (append-only looks like the intended design, given the autoincrement `id`
 with no unique constraint — worth confirming that's still what you want).
 
-### 5. Frontend — breaking the dashboard into sections
+### 4. Frontend — breaking the dashboard into sections
 You want six sections:
 
 - **Library Management** — refresh controls (what's already in the "Library
