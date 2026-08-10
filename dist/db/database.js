@@ -1,3 +1,910 @@
-console.log('DB');
-export {};
+import Database from 'better-sqlite3';
+import path from 'path';
+import fs from 'fs';
+import * as Queries from './databaseQueries.js';
+import { getAllEpisodesForShow, getChildrenForArtist, getChildrenForAlbum } from '../connectors/plex.js';
+import { config } from '../config.js';
+// Load/Create dabase
+// DB_PATH env var (see src/config.ts) lets tests point this at ':memory:'
+// instead of the real on-disk database.
+const dbPath = config.dbPath === ':memory:' ? ':memory:' : path.join(process.cwd(), config.dbPath);
+export const db = new Database(dbPath);
+// Load database schema
+const schema = fs.readFileSync('./plexcriticv2.db.sql', 'utf8');
+db.exec(schema);
+db.pragma('foreign_keys = ON');
+// Prepare DB queries
+const upsertMedia = db.prepare(Queries.getUpsertMediaQuery());
+//const deleteMedia = db.prepare(Queries.getDeleteMediaQuery())
+const upsertMediaFiles = db.prepare(Queries.getUpsertMediaFilesQuery());
+const upsertMovies = db.prepare(Queries.getUpsertMoviesQuery());
+const upsertShows = db.prepare(Queries.getUpsertShowsQuery());
+const upsertEpisodes = db.prepare(Queries.getUpsertEpisodesQuery());
+const upsertTags = db.prepare(Queries.getUpsertTagsQuery());
+const upsertMediaTags = db.prepare(Queries.getUpsertMediaTagsQuery());
+const getTagId = db.prepare(Queries.getTagId());
+const upsertSyncLog = db.prepare(Queries.getUpsertSyncLogQuery());
+const upsertMusicArtists = db.prepare(Queries.getUpsertMusicArtistsQuery());
+const upsertMusicAlbums = db.prepare(Queries.getUpsertMusicAlbumsQuery());
+const upsertMusicTracks = db.prepare(Queries.getUpsertMusicTracksQuery());
+/************MAPPERS************
+ * Map Plex data -> DB format
+ *****************************/
+export function mapPlexMovies(plexMovies) {
+    let moviesArr = [];
+    let mediaArr = [];
+    let mediaFilesArr = [];
+    let mediaTagLinks = [];
+    let tagsArr = [];
+    const movies = plexMovies.MediaContainer.Metadata;
+    const libraryName = plexMovies.MediaContainer.librarySectionTitle;
+    const librarySectionKey = plexMovies.MediaContainer.librarySectionID;
+    const tagSet = new Set();
+    // Loop through every movie passed into the mapper
+    for (const movie of movies) {
+        // For each movie, build a record and push it to moviesArr
+        moviesArr.push({
+            ratingKey: movie.ratingKey,
+            studio: movie.studio ?? '',
+            tagLine: movie.tagline ?? '',
+            contentRating: movie.contentRating ?? '',
+            contentRatingAge: movie.contentRatingAge ?? '',
+            audienceRating: movie.audienceRating ?? '',
+            coverPosterUrl: movie.Image?.find((img) => img.type === 'coverPoster')?.url ?? '',
+        });
+        // For each movie , build a media record (shared format between movies and tv) and push it to mediaArr
+        mediaArr.push({
+            ratingKey: movie.ratingKey,
+            type: movie.type ?? 'other',
+            title: movie.title ?? '',
+            year: movie.year ?? 0,
+            dateAdded: movie.addedAt ?? 0,
+            originallyAvailableAt: movie.originallyAvailableAt ?? '',
+            duration: movie.duration ?? 0,
+            libraryName: libraryName,
+            librarySectionKey: librarySectionKey.toString(),
+            lastRefreshed: Date.now(),
+            viewCount: movie.viewCount ?? 0,
+            lastViewedAt: movie.lastViewedAt ?? 0,
+        });
+        // For each media section in a movie, build a media files record for each file and push it to mediaArr
+        if (movie.Media && Array.isArray(movie.Media)) {
+            for (const media of movie.Media) {
+                if (media.Part && Array.isArray(media.Part)) {
+                    for (const file of media.Part) {
+                        mediaFilesArr.push({
+                            id: media.id,
+                            ratingKey: movie.ratingKey,
+                            audioCodec: media.audioCodec ?? '',
+                            videoCodec: media.videoCodec ?? '',
+                            videoResolution: media.videoResolution ?? '',
+                            videoFrameRate: media.videoFrameRate ?? '',
+                            container: media.container ?? '',
+                            file: file.file ?? '',
+                        });
+                    }
+                }
+            }
+        }
+        for (const [key, value] of Object.entries(movie)) {
+            if (!Array.isArray(value) ||
+                !value.length ||
+                typeof value[0] !== 'object' ||
+                !('tag' in value[0])) {
+                continue;
+            }
+            const tagType = key.toLowerCase();
+            for (const v of value) {
+                const tagName = v.tag;
+                const uniqueKey = `${tagType}:${tagName}`;
+                // Deduplicate tags
+                if (!tagSet.has(uniqueKey)) {
+                    tagSet.add(uniqueKey);
+                    tagsArr.push({
+                        tagType,
+                        name: tagName,
+                    });
+                }
+                // ALWAYS create relationship link
+                mediaTagLinks.push({
+                    ratingKey: movie.ratingKey,
+                    tagType,
+                    tagName,
+                });
+            }
+        }
+    }
+    return {
+        moviesArr,
+        mediaArr,
+        mediaFilesArr,
+        tagsArr,
+        mediaTagLinks,
+    };
+}
+export async function mapPlexShows(plexShows) {
+    let showsArr = [];
+    let episodesArr = [];
+    let mediaArr = [];
+    let mediaFilesArr = [];
+    let tagsArr = [];
+    let mediaTagLinks = [];
+    const shows = plexShows.MediaContainer.Metadata;
+    const libraryName = plexShows.MediaContainer.librarySectionTitle;
+    const librarySectionKey = plexShows.MediaContainer.librarySectionID;
+    const tagSet = new Set();
+    // Loop through every show passed into the mapper
+    for (const show of shows) {
+        // Fetch all the episodes
+        const episodesRes = await getAllEpisodesForShow(show.ratingKey);
+        const episodes = episodesRes.MediaContainer.Metadata;
+        for (const episode of episodes) {
+            // For each episode, build a record and push it to episodesArr
+            episodesArr.push({
+                ratingKey: episode.ratingKey,
+                showRatingKey: show.ratingKey,
+                seasonNumber: episode.parentIndex ?? 0,
+                episodeNumber: episode.index ?? 0,
+            });
+            // For each media file, build a media record (shared format between movies and tv) and push it to mediaArr
+            mediaArr.push({
+                ratingKey: episode.ratingKey,
+                type: episode.type ?? 'other',
+                title: episode.title ?? '',
+                year: episode.year ?? 0,
+                dateAdded: episode.addedAt ?? 0,
+                originallyAvailableAt: episode.originallyAvailableAt ?? '',
+                duration: episode.duration ?? 0,
+                libraryName: libraryName,
+                librarySectionKey: librarySectionKey.toString(),
+                lastRefreshed: Date.now(),
+                viewCount: episode.viewCount ?? 0,
+                lastViewedAt: episode.lastViewedAt ?? 0
+            });
+            // For each media section in a movie, build a media files record for each file and push it to mediaArr
+            if (episode.Media && Array.isArray(episode.Media)) {
+                for (const media of episode.Media) {
+                    if (media.Part && Array.isArray(media.Part)) {
+                        for (const file of media.Part) {
+                            mediaFilesArr.push({
+                                id: media.id,
+                                ratingKey: episode.ratingKey,
+                                audioCodec: media.audioCodec ?? '',
+                                videoCodec: media.videoCodec ?? '',
+                                videoResolution: media.videoResolution ?? '',
+                                videoFrameRate: media.videoFrameRate ?? '',
+                                container: media.container ?? '',
+                                file: file.file ?? '',
+                            });
+                        }
+                    }
+                }
+            }
+            // Build out all of the tags associated to episode
+            for (const [key, value] of Object.entries(episode)) {
+                if (!Array.isArray(value) ||
+                    !value.length ||
+                    typeof value[0] !== 'object' ||
+                    !('tag' in value[0])) {
+                    continue;
+                }
+                const tagType = key.toLowerCase();
+                for (const v of value) {
+                    const tagName = v.tag;
+                    const uniqueKey = `${tagType}:${tagName}`;
+                    // Deduplicate tags
+                    if (!tagSet.has(uniqueKey)) {
+                        tagSet.add(uniqueKey);
+                        tagsArr.push({
+                            tagType,
+                            name: tagName,
+                        });
+                    }
+                    // ALWAYS create relationship link
+                    mediaTagLinks.push({
+                        ratingKey: episode.ratingKey,
+                        tagType,
+                        tagName,
+                    });
+                }
+            }
+        }
+        // For each show, build a record and push it to showsArr
+        showsArr.push({
+            ratingKey: show.ratingKey,
+            studio: show.studio ?? '',
+            contentRating: show.contentRating ?? '',
+            contentRatingAge: show.contentRatingAge ?? '',
+            audienceRating: show.audienceRating ?? '',
+            coverPosterUrl: show.Image?.find((img) => img.type === 'coverPoster')?.url ?? '',
+            leafCount: show.leafCount ?? 0,
+            viewedLeafCount: show.viewedLeafCount ?? 0,
+        });
+        // Also create a media record for the show so the shows foreign key can be satisfied
+        mediaArr.push({
+            ratingKey: show.ratingKey,
+            type: show.type ?? 'show',
+            title: show.title ?? '',
+            year: show.year ?? 0,
+            dateAdded: show.addedAt ?? 0,
+            originallyAvailableAt: show.originallyAvailableAt ?? '',
+            duration: show.duration ?? 0,
+            libraryName: libraryName,
+            librarySectionKey: librarySectionKey.toString(),
+            lastRefreshed: Date.now(),
+            viewCount: show.viewCount ?? 0,
+            lastViewedAt: show.lastViewedAt ?? 0
+        });
+        // Build out all of the tags associated to show
+        for (const [key, value] of Object.entries(show)) {
+            if (!Array.isArray(value) ||
+                !value.length ||
+                typeof value[0] !== 'object' ||
+                !('tag' in value[0])) {
+                continue;
+            }
+            const tagType = key.toLowerCase();
+            for (const v of value) {
+                const tagName = v.tag;
+                const uniqueKey = `${tagType}:${tagName}`;
+                // Deduplicate tags
+                if (!tagSet.has(uniqueKey)) {
+                    tagSet.add(uniqueKey);
+                    tagsArr.push({
+                        tagType,
+                        name: tagName,
+                    });
+                }
+                // ALWAYS create relationship link
+                mediaTagLinks.push({
+                    ratingKey: show.ratingKey,
+                    tagType,
+                    tagName,
+                });
+            }
+        }
+    }
+    return {
+        showsArr,
+        episodesArr,
+        mediaArr,
+        mediaFilesArr,
+        tagsArr,
+        mediaTagLinks,
+    };
+}
+export function mapPlexEpisodes(plexEpisodes) {
+    let episodesArr = [];
+    let mediaArr = [];
+    let mediaFilesArr = [];
+    let tagsArr = [];
+    const episodes = plexEpisodes.MediaContainer.Metadata;
+    const libraryName = plexEpisodes.MediaContainer.librarySectionTitle;
+    const librarySectionKey = plexEpisodes.MediaContainer.librarySectionID;
+    // Loop through every episode passed into the mapper
+    for (const episode of episodes) {
+        // For each episode, build a record and push it to showsArr
+        episodesArr.push({
+            ratingKey: episode.ratingKey,
+            showRatingKey: episode.grandparentRatingKey ?? '',
+            seasonNumber: episode.parentIndex ?? 999,
+            episodeNumber: episode.index ?? 999,
+        });
+        //For each show , build a media record (shared format between movies and tv) and push it to mediaArr
+        mediaArr.push({
+            ratingKey: episode.ratingKey,
+            type: episode.type ?? '',
+            title: episode.title ?? '',
+            year: episode.year ?? 0,
+            dateAdded: episode.addedAt ?? 0,
+            originallyAvailableAt: episode.originallyAvailableAt ?? '',
+            duration: episode.duration ?? 0,
+            libraryName: libraryName,
+            librarySectionKey: librarySectionKey.toString(),
+            lastRefreshed: Date.now(),
+            viewCount: episode.viewCount ?? 0,
+            lastViewedAt: episode.lastViewedAt ?? 0
+        });
+        //For each media section in a show, build a media files record for each file and push it to mediaArr
+        if (episode.Media && Array.isArray(episode.Media)) {
+            for (const media of episode.Media) {
+                if (media.Part && Array.isArray(media.Part)) {
+                    for (const file of media.Part) {
+                        mediaFilesArr.push({
+                            id: media.id,
+                            ratingKey: episode.ratingKey,
+                            audioCodec: media.audioCodec ?? '',
+                            videoCodec: media.videoCodec ?? '',
+                            videoResolution: media.videoResolution ?? '',
+                            videoFrameRate: media.videoFrameRate ?? '',
+                            container: media.container ?? '',
+                            file: file.file ?? '',
+                        });
+                    }
+                }
+            }
+        }
+        const tagSet = new Set();
+        for (const [key, value] of Object.entries(episode)) {
+            if (!Array.isArray(value) ||
+                !value.length ||
+                typeof value[0] !== 'object' ||
+                !('tag' in value[0])) {
+                continue;
+            }
+            const tagType = key.toLowerCase();
+            for (const v of value) {
+                const tagName = v.tag;
+                const uniqueKey = `${tagType}:${tagName}`;
+                // Deduplicate tags
+                if (!tagSet.has(uniqueKey)) {
+                    tagSet.add(uniqueKey);
+                    tagsArr.push({
+                        tagType,
+                        name: tagName,
+                    });
+                }
+            }
+        }
+    }
+    return {
+        episodesArr,
+        mediaArr,
+        mediaFilesArr,
+        tagsArr,
+    };
+}
+export async function mapPlexMusic(plexMusic) {
+    let musicArtistsArr = [];
+    let musicAlbumsArr = [];
+    let musicTracksArr = [];
+    let mediaArr = [];
+    let mediaFilesArr = [];
+    let tagsArr = [];
+    let mediaTagLinks = [];
+    const artists = plexMusic.MediaContainer.Metadata;
+    const libraryName = plexMusic.MediaContainer.librarySectionTitle;
+    const librarySectionKey = plexMusic.MediaContainer.librarySectionID;
+    const tagSet = new Set();
+    const artistMap = new Map();
+    const albumMap = new Map();
+    let nextFallbackId = 1;
+    // Loop through every artist in the music library
+    for (const artist of artists) {
+        const artistName = artist.title ?? 'Unknown Artist';
+        let artistId = Number(artist.ratingKey);
+        if (Number.isNaN(artistId)) {
+            artistId = nextFallbackId++;
+        }
+        // Deduplicate by Plex ratingKey (unique identifier), not by name
+        if (!artistMap.has(artist.ratingKey)) {
+            artistMap.set(artist.ratingKey, artistId);
+            musicArtistsArr.push({
+                id: artistId,
+                name: artistName,
+            });
+        }
+        // Fetch all albums for this artist
+        try {
+            const albumsRes = await getChildrenForArtist(librarySectionKey.toString(), artist.ratingKey);
+            const albums = Array.isArray(albumsRes.MediaContainer.Metadata)
+                ? albumsRes.MediaContainer.Metadata
+                : albumsRes.MediaContainer.Metadata
+                    ? [albumsRes.MediaContainer.Metadata]
+                    : [];
+            for (const album of albums) {
+                const albumTitle = album.title ?? 'Unknown Album';
+                let albumId = Number(album.ratingKey);
+                if (Number.isNaN(albumId)) {
+                    if (albumMap.has(album.ratingKey)) {
+                        albumId = albumMap.get(album.ratingKey);
+                    }
+                    else {
+                        albumId = nextFallbackId++;
+                        albumMap.set(album.ratingKey, albumId);
+                    }
+                }
+                if (!musicAlbumsArr.some((al) => al.id === albumId)) {
+                    musicAlbumsArr.push({
+                        id: albumId,
+                        artistId: artistId,
+                        title: albumTitle,
+                        year: album.year ?? 0,
+                    });
+                }
+                // Fetch all tracks for this album
+                try {
+                    const tracksRes = await getChildrenForAlbum(album.ratingKey);
+                    const tracks = Array.isArray(tracksRes.MediaContainer.Metadata)
+                        ? tracksRes.MediaContainer.Metadata
+                        : tracksRes.MediaContainer.Metadata
+                            ? [tracksRes.MediaContainer.Metadata]
+                            : [];
+                    for (const track of tracks) {
+                        // Build media record for track
+                        mediaArr.push({
+                            ratingKey: track.ratingKey,
+                            type: track.type ?? 'track',
+                            title: track.title ?? '',
+                            year: track.year ?? 0,
+                            dateAdded: track.addedAt ?? 0,
+                            originallyAvailableAt: track.originallyAvailableAt ?? '',
+                            duration: track.duration ?? 0,
+                            libraryName: libraryName,
+                            librarySectionKey: librarySectionKey.toString(),
+                            lastRefreshed: Date.now(),
+                            viewCount: track.viewCount ?? 0,
+                            lastViewedAt: track.lastViewedAt ?? 0
+                        });
+                        // Build music track record
+                        musicTracksArr.push({
+                            ratingKey: track.ratingKey,
+                            artistId: artistId,
+                            albumId: albumId,
+                            trackNumber: track.index ?? 0,
+                        });
+                        // Build media files records
+                        if (track.Media && Array.isArray(track.Media)) {
+                            for (const media of track.Media) {
+                                if (media.Part && Array.isArray(media.Part)) {
+                                    for (const file of media.Part) {
+                                        mediaFilesArr.push({
+                                            id: media.id,
+                                            ratingKey: track.ratingKey,
+                                            audioCodec: media.audioCodec ?? '',
+                                            videoCodec: media.videoCodec ?? '',
+                                            videoResolution: media.videoResolution ?? '',
+                                            videoFrameRate: media.videoFrameRate ?? '',
+                                            container: media.container ?? '',
+                                            file: file.file ?? '',
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        // Build tags for track
+                        for (const [key, value] of Object.entries(track)) {
+                            if (!Array.isArray(value) ||
+                                !value.length ||
+                                typeof value[0] !== 'object' ||
+                                !('tag' in value[0])) {
+                                continue;
+                            }
+                            const tagType = key.toLowerCase();
+                            for (const v of value) {
+                                const tagName = v.tag;
+                                const uniqueKey = `${tagType}:${tagName}`;
+                                if (!tagSet.has(uniqueKey)) {
+                                    tagSet.add(uniqueKey);
+                                    tagsArr.push({
+                                        tagType,
+                                        name: tagName,
+                                    });
+                                }
+                                mediaTagLinks.push({
+                                    ratingKey: track.ratingKey,
+                                    tagType,
+                                    tagName,
+                                });
+                            }
+                        }
+                    }
+                }
+                catch (err) {
+                    console.error(`Error fetching tracks for album ${album.ratingKey}:`, err);
+                }
+            }
+        }
+        catch (err) {
+            console.error(`Error fetching albums for artist ${artist.ratingKey}:`, err);
+        }
+        console.log(`Processed artist: ${artistName} (ID: ${artistId})`);
+    }
+    return {
+        musicArtistsArr,
+        musicAlbumsArr,
+        musicTracksArr,
+        mediaArr,
+        mediaFilesArr,
+        tagsArr,
+        mediaTagLinks,
+    };
+}
+/************LOGGERS************
+ * Logs changes made to DB
+ *****************************/
+function syncLogUpsert(arr, table, results) {
+    if (!arr || arr.length === 0 || !results || results.length === 0) {
+        return;
+    }
+    try {
+        const trx = db.transaction(() => {
+            const logBatch = [];
+            for (const resultRow of results) {
+                const arrIndex = resultRow.lastInsertRowid;
+                // Only create a log record if lastInsertRowid has a value because that means a change was made
+                if (arrIndex != 0) {
+                    const logEntry = `Upsert into: ${table}`;
+                    if (arr[arrIndex]?.ratingKey) {
+                        upsertSyncLog.run({
+                            ratingKey: arr[arrIndex]?.ratingKey,
+                            lastSynced: Date.now(),
+                            logEntry: logEntry,
+                        });
+                        logBatch.push({
+                            ratingKey: arr[arrIndex]?.ratingKey,
+                            lastSynced: Date.now(),
+                            logEntry: logEntry,
+                        });
+                    }
+                }
+            }
+        });
+        trx();
+    }
+    catch (err) {
+        console.log('SyncLog Error: ', err);
+        return;
+    }
+    return;
+}
+/************UPSERTERS************
+ * Inserts data into DB tables
+ *****************************/
+export function upsertMovie(container) {
+    const { moviesArr, mediaArr, mediaFilesArr, tagsArr, mediaTagLinks } = container;
+    const count = {
+        movies: moviesArr.length,
+        media: mediaArr.length,
+        media_files: mediaFilesArr.length,
+        tags: tagsArr.length,
+        media_tags: mediaTagLinks.length,
+    };
+    const trx = db.transaction(() => {
+        // 1. Media
+        try {
+            const logData = [];
+            for (const m of mediaArr) {
+                const r = upsertMedia.run(m);
+                logData.push({
+                    changes: r.changes,
+                    lastInsertRowid: Number(r.lastInsertRowid),
+                });
+            }
+            syncLogUpsert(mediaArr, 'media', logData);
+        }
+        catch (err) {
+            console.error('Error when upserting to media table: ', err);
+        }
+        // 2. Movies
+        try {
+            const logData = [];
+            for (const m of moviesArr) {
+                const r = upsertMovies.run(m);
+                logData.push({
+                    changes: r.changes,
+                    lastInsertRowid: Number(r.lastInsertRowid),
+                });
+            }
+            syncLogUpsert(moviesArr, 'movies', logData);
+        }
+        catch (err) {
+            console.error('Error when upserting to movies table: ', err);
+        }
+        // 3. Media Files
+        try {
+            const logData = [];
+            for (const mf of mediaFilesArr) {
+                const r = upsertMediaFiles.run(mf);
+                logData.push({
+                    changes: r.changes,
+                    lastInsertRowid: Number(r.lastInsertRowid),
+                });
+            }
+            syncLogUpsert(mediaFilesArr, 'media_files', logData);
+        }
+        catch (err) {
+            console.error('Error when upserting to media_files table: ', err);
+        }
+        // 4. Tags
+        try {
+            for (const t of tagsArr) {
+                upsertTags.run(t);
+            }
+        }
+        catch (err) {
+            console.error('Error when upserting to tags table: ', err);
+        }
+        // 5. Build + insert media_tags
+        try {
+            const logData = [];
+            for (const link of mediaTagLinks) {
+                const row = getTagId.get({
+                    tagType: link.tagType,
+                    tagName: link.tagName,
+                });
+                if (row) {
+                    const r = upsertMediaTags.run({
+                        ratingKey: link.ratingKey,
+                        tagId: row.id,
+                    });
+                    logData.push({
+                        changes: r.changes,
+                        lastInsertRowid: Number(r.lastInsertRowid),
+                    });
+                }
+            }
+            syncLogUpsert(mediaTagLinks, 'media_tags', logData);
+        }
+        catch (err) {
+            console.error('Error when upserting to media_tags table: ', err);
+        }
+    });
+    trx();
+    return count;
+}
+export function upsertShow(container) {
+    const { showsArr, episodesArr, mediaArr, mediaFilesArr, tagsArr, mediaTagLinks, } = container;
+    const count = {
+        shows: showsArr.length,
+        episodes: episodesArr.length,
+        media: mediaArr.length,
+        media_files: mediaFilesArr.length,
+        tags: tagsArr.length,
+        media_tags: mediaTagLinks.length,
+    };
+    const trx = db.transaction(() => {
+        // 1. Media
+        try {
+            for (const m of mediaArr) {
+                upsertMedia.run(m);
+            }
+        }
+        catch (err) {
+            console.error('Error when upserting to media table: ', err);
+        }
+        // 2. Shows
+        try {
+            for (const m of showsArr) {
+                upsertShows.run(m);
+            }
+        }
+        catch (err) {
+            console.error('Error when upserting to shows table: ', err);
+        }
+        // 3. Episodes
+        try {
+            for (const m of episodesArr) {
+                upsertEpisodes.run(m);
+            }
+        }
+        catch (err) {
+            console.error('Error when upserting to episodes table: ', err);
+            throw err;
+        }
+        // 4. Media Files
+        try {
+            for (const mf of mediaFilesArr) {
+                upsertMediaFiles.run(mf);
+            }
+        }
+        catch (err) {
+            console.error('Error when upserting to media_files table: ', err);
+        }
+        // 5. Tags
+        try {
+            for (const t of tagsArr) {
+                upsertTags.run(t);
+            }
+        }
+        catch (err) {
+            console.error('Error when upserting to tags table: ', err);
+        }
+        // 6. Build + insert media_tags
+        try {
+            for (const link of mediaTagLinks) {
+                const row = getTagId.get({
+                    tagType: link.tagType,
+                    tagName: link.tagName,
+                });
+                if (row) {
+                    upsertMediaTags.run({
+                        ratingKey: link.ratingKey,
+                        tagId: row.id,
+                    });
+                }
+            }
+        }
+        catch (err) {
+            console.error('Error when upserting to media_tags table: ', err);
+        }
+    });
+    trx();
+    return count;
+}
+export function upsertMusic(container) {
+    const { musicArtistsArr, musicAlbumsArr, musicTracksArr, mediaArr, mediaFilesArr, tagsArr, mediaTagLinks, } = container;
+    const count = {
+        music_artists: musicArtistsArr.length,
+        music_albums: musicAlbumsArr.length,
+        music_tracks: musicTracksArr.length,
+        media: mediaArr.length,
+        media_files: mediaFilesArr.length,
+        tags: tagsArr.length,
+        media_tags: mediaTagLinks.length,
+    };
+    const trx = db.transaction(() => {
+        console.log('upsertMusic: starting music upsert', count);
+        // 1. Media
+        console.log(`upsertMusic: upserting ${mediaArr.length} media rows`);
+        try {
+            for (const m of mediaArr) {
+                upsertMedia.run(m);
+            }
+        }
+        catch (err) {
+            console.error('Error when upserting to media table: ', err);
+        }
+        // 2. Music Artists
+        console.log(`upsertMusic: upserting ${musicArtistsArr.length} music artist rows`);
+        try {
+            for (const a of musicArtistsArr) {
+                upsertMusicArtists.run(a);
+            }
+        }
+        catch (err) {
+            console.error('Error when upserting to music_artists table: ', err);
+        }
+        // 3. Music Albums
+        console.log(`upsertMusic: upserting ${musicAlbumsArr.length} music album rows`);
+        try {
+            for (const al of musicAlbumsArr) {
+                upsertMusicAlbums.run(al);
+            }
+        }
+        catch (err) {
+            console.error('Error when upserting to music_albums table: ', err);
+        }
+        // 4. Music Tracks
+        console.log(`upsertMusic: upserting ${musicTracksArr.length} music track rows`);
+        try {
+            for (const t of musicTracksArr) {
+                upsertMusicTracks.run(t);
+            }
+        }
+        catch (err) {
+            console.error('Error when upserting to music_tracks table: ', err);
+            throw err;
+        }
+        // 5. Media Files
+        console.log(`upsertMusic: upserting ${mediaFilesArr.length} media file rows`);
+        try {
+            for (const mf of mediaFilesArr) {
+                upsertMediaFiles.run(mf);
+            }
+        }
+        catch (err) {
+            console.error('Error when upserting to media_files table: ', err);
+        }
+        // 6. Tags
+        console.log(`upsertMusic: upserting ${tagsArr.length} tag rows`);
+        try {
+            for (const t of tagsArr) {
+                upsertTags.run(t);
+            }
+        }
+        catch (err) {
+            console.error('Error when upserting to tags table: ', err);
+        }
+        // 7. Build + insert media_tags
+        console.log(`upsertMusic: upserting ${mediaTagLinks.length} media_tag links`);
+        try {
+            for (const link of mediaTagLinks) {
+                const row = getTagId.get({
+                    tagType: link.tagType,
+                    tagName: link.tagName,
+                });
+                if (row) {
+                    upsertMediaTags.run({
+                        ratingKey: link.ratingKey,
+                        tagId: row.id,
+                    });
+                }
+            }
+        }
+        catch (err) {
+            console.error('Error when upserting to media_tags table: ', err);
+        }
+    });
+    trx();
+    return count;
+}
+/************REFRESHERS************
+ * Refreshes data in library
+ *****************************/
+export async function refreshAllItemsInSection(allItems) {
+    try {
+        let attempting = '';
+        if (allItems.MediaContainer.viewGroup === 'movie') {
+            upsertMovie(mapPlexMovies(allItems));
+            attempting = `movies`;
+        }
+        else if (allItems.MediaContainer.viewGroup === 'show') {
+            upsertShow(await mapPlexShows(allItems));
+            attempting = `shows`;
+        }
+        else if (allItems.MediaContainer.viewGroup === 'artist') {
+            upsertMusic(await mapPlexMusic(allItems));
+            attempting = `music`;
+        }
+        else {
+            console.log('Other implementation is not ready yet');
+            attempting = `other`;
+        }
+        return true;
+    }
+    catch (err) {
+        console.error(`Error upserting items in section ${allItems}:`, err);
+        throw err;
+    }
+}
+export function getDatabaseStats() {
+    const tables = [
+        'media',
+        'movies',
+        'shows',
+        'episodes',
+        'media_files',
+        'tags',
+        'media_tags',
+        'critic_reviews',
+        'sync_log',
+        'music_tracks',
+        'music_albums',
+        'music_artists',
+    ];
+    return tables.reduce((acc, table) => {
+        const row = db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get();
+        acc[table] = typeof row?.count === 'number' ? row.count : 0;
+        return acc;
+    }, {});
+}
+/************CLEANERS************
+ * Cleans out dead data in library
+ *****************************/
+export function clearDatabase(tableName) {
+    try {
+        const trx = db.transaction(() => {
+            if (tableName === 'ALL') {
+                // Delete in order to respect foreign key constraints (children before parents)
+                db.prepare(`DELETE FROM critic_reviews`).run();
+                db.prepare(`DELETE FROM media_tags`).run();
+                db.prepare(`DELETE FROM media_files`).run();
+                db.prepare(`DELETE FROM episodes`).run();
+                db.prepare(`DELETE FROM music_tracks`).run();
+                db.prepare(`DELETE FROM shows`).run();
+                db.prepare(`DELETE FROM movies`).run();
+                db.prepare(`DELETE FROM music_albums`).run();
+                db.prepare(`DELETE FROM music_artists`).run();
+                db.prepare(`DELETE FROM tags`).run();
+                db.prepare(`DELETE FROM media`).run();
+                db.prepare(`DELETE FROM sync_log`).run();
+                db.prepare(`DELETE FROM sqlite_sequence`).run();
+            }
+            else {
+                db.prepare(`DELETE FROM ${tableName}`).run();
+            }
+        });
+        trx();
+    }
+    catch (err) {
+        console.error('Database cleanup error for table: ', tableName);
+        console.error('Error details: ', err);
+        return err;
+    }
+    return 'DB has been cleared';
+}
+// TODO - Master refresh function
+// TODO - Data cleaners
+// TODO - Creating views
 //# sourceMappingURL=database.js.map

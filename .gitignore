@@ -1,3 +1,6 @@
 .env
 node_modules/
+client/node_modules/
 plexcritic.db
+plexcriticv2.db
+dist/
